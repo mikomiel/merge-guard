@@ -1,0 +1,27 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Public-content scan
+        run: python3 scripts/check_estate_identifiers.py
+      - name: Lint and test
+        run: |
+          if [ -f pyproject.toml ]; then
+            python -m pip install --upgrade pip ruff pytest
+            ruff check .
+            if [ -d tests ]; then python -m pytest -q; fi
+          fi

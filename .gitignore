@@ -1,0 +1,4 @@
+.estate-identifiers
+__pycache__/
+*.pyc
+.venv/
