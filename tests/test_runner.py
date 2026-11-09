@@ -217,3 +217,12 @@ def test_maintainer_ids_binds_the_permission_to_the_reviewer_id():
     with pytest.raises(runner.ApiError):
         runner.maintainer_ids(api, [human], "author")
     assert runner.maintainer_ids(api, [review()], "author") == set()
+
+
+def test_publish_republishes_when_the_official_status_was_not_from_the_bot():
+    api = runner.GitHub(policy(), apply=True)
+    posts = []
+    api.statuses = lambda sha: [status(login="someone-else")]
+    api.request = lambda path, method="GET", body=None: posts.append((method, path))
+    api.publish(HEAD, "success", "approved_at_head")
+    assert [path for method, path in posts if method == "POST"]

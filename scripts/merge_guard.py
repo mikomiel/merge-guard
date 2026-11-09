@@ -172,7 +172,9 @@ def maintainer_ids(api: GitHub, reviews: Any, author: str) -> set[int]:
     for item in reviews:
         if not isinstance(item, dict):
             raise ApiError("review_unusable")
-        user = item.get("user") or {}
+        user = item.get("user")
+        if not isinstance(user, dict):
+            raise ApiError("review_user_unusable")
         login = user.get("login")
         if (user.get("type") != "User" or login == author
                 or item.get("state") not in mg.DECISIVE):

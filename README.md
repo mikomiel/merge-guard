@@ -31,9 +31,9 @@ integration until a tagged release says so.
 1. Copy `examples/merge-guard.toml` to `.github/merge-guard.toml` and replace
    every placeholder: `OWNER/REPO`, `REVIEWER[bot]`, its numeric `reviewer_id`,
    `CHECKS`, the workflow file names and the ordinary-path allowlist.
-2. Add the three workflows from `examples/` under the file names the policy
-   defaults to: `merge-guard-review.yml`, `merge-guard-merge.yml` and
-   `review-relay.yml`. Pin `mikomiel/merge-guard` by 40-hex SHA, and replace
+2. Add the three workflows from `examples/`. The policy defaults name
+   `merge-guard-review.yml` and `merge-guard-merge.yml`; `review-relay.yml` is
+   the no-op relay and has no policy entry. Pin `mikomiel/merge-guard` by 40-hex SHA, and replace
    the placeholder values each file names at the top: the base branch, your CI
    workflow's display name, and the policy placeholders.
 3. Grant them the permissions each file declares and nothing more. The gate
