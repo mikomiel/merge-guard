@@ -12,8 +12,6 @@ base_branch = "main"
 reviewer_id = 0
 reviewer_login = "REVIEWER[bot]"
 reviewer_type = "Bot"
-# Association labels accepted as a manual fallback for the gate status only.
-trusted_associations = ["OWNER", "MEMBER"]
 required_checks = ["CHECKS"]
 gate_context = "review"
 review_workflow = "merge-guard-review.yml"

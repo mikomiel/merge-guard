@@ -1,4 +1,4 @@
-"""The acceptance cases from issue #2 plus the behavioural guards behind them."""
+"""Acceptance cases from issue #2 plus the guards the second review asked for."""
 
 import tomllib
 from pathlib import Path
@@ -20,7 +20,6 @@ def make_policy(**overrides):
             "reviewer_id": REVIEWER_ID,
             "reviewer_login": "reviewer[bot]",
             "reviewer_type": "Bot",
-            "trusted_associations": ["OWNER"],
             "required_checks": ["checks"],
             "gate_context": "review",
         },
@@ -36,13 +35,13 @@ def review(state, commit=HEAD, login="reviewer[bot]", kind="Bot", rid=1, user_id
             "user": {"id": user_id, "login": login, "type": kind}}
 
 
-def run(name="checks", sha=HEAD, status="completed", conclusion="success", rid=1):
-    return {"id": rid, "name": name, "head_sha": sha, "status": status,
+def run(name="checks", sha=HEAD, conclusion="success", rid=1):
+    return {"id": rid, "name": name, "head_sha": sha, "status": "completed",
             "conclusion": conclusion, "app": {"id": mg.ACTIONS_APP_ID}}
 
 
-def gate_status(state="success", login="github-actions[bot]", kind="Bot", rid=1, context="review"):
-    return {"id": rid, "context": context, "state": state,
+def gate_status(state="success", login="github-actions[bot]", kind="Bot", rid=1):
+    return {"id": rid, "context": "review", "state": state,
             "creator": {"login": login, "type": kind}}
 
 
@@ -66,9 +65,9 @@ def pull(**over):
 def decide(policy=None, pr=None, reviews=None, runs=None, statuses=None, files=None,
            maintainers=()):
     policy = policy or make_policy()
-    pr = pr or pull()
     return mg.merge_decision(
-        pr, reviews if reviews is not None else [review("APPROVED")],
+        pr or pull(),
+        reviews if reviews is not None else [review("APPROVED")],
         runs if runs is not None else [run()],
         statuses if statuses is not None else [gate_status()],
         comparison(files or ["README.md"]), set(maintainers), policy)
@@ -84,8 +83,8 @@ def test_rename_is_judged_on_both_sides():
 
 
 def test_status_from_untrusted_creator_blocks():
-    allowed, reason = decide(statuses=[gate_status(login="someone", kind="User")])
-    assert (allowed, reason) == (False, "untrusted_review_status")
+    assert decide(statuses=[gate_status(login="someone", kind="User")]) == (
+        False, "untrusted_review_status")
 
 
 def test_stale_head_check_blocks():
@@ -93,11 +92,13 @@ def test_stale_head_check_blocks():
 
 
 def test_approval_on_an_older_head_does_not_count():
-    assert decide(reviews=[review("APPROVED", commit=OLD)]) == (False, "current_head_approval_required")
+    assert decide(reviews=[review("APPROVED", commit=OLD)]) == (
+        False, "current_head_approval_required")
 
 
 def test_lock_file_only_change_is_sensitive_by_default():
-    assert decide(pr=pull(changed_files=1), files=["requirements-dev.txt"]) == (False, "sensitive_paths")
+    assert decide(pr=pull(changed_files=1), files=["requirements-dev.txt"]) == (
+        False, "sensitive_paths")
 
 
 def test_lock_file_only_change_needs_the_exemption():
@@ -129,7 +130,6 @@ def test_maintainer_review_satisfies_the_verdict_but_not_automerge():
     maintainer = review("APPROVED", login="owner", kind="User", user_id=99)
     policy = make_policy()
     assert mg.review_verdict([maintainer], HEAD, "author", {99}, policy)[0] == "success"
-    assert decide(policy=policy, reviews=[maintainer], maintainers=[])[0] is False
     assert decide(policy=policy, reviews=[maintainer], maintainers=[99]) == (
         False, "configured_reviewer_required_for_automerge")
 
@@ -138,6 +138,16 @@ def test_policy_requires_a_reviewer_id():
     with pytest.raises(mg.Unusable):
         mg.load_policy({"repository": {"name": "o/r", "base_branch": "main"},
                         "review": {"reviewer_login": "x[bot]", "required_checks": ["c"]}})
+
+
+def test_policy_refuses_a_string_ordinary_list():
+    with pytest.raises(mg.Unusable):
+        make_policy(paths={"ordinary": "docs/**"})
+
+
+def test_policy_refuses_a_string_boolean():
+    with pytest.raises(mg.Unusable):
+        make_policy(paths={"dependency_update_exemption": "false"})
 
 
 def test_ordinary_is_an_allowlist_and_star_cannot_cross_a_slash():

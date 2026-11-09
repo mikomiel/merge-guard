@@ -1,3 +1,5 @@
+# Replace before use: `main` with the policy base_branch, `CI` with your CI
+# workflow's display name, and the merge-guard ref with the release SHA.
 # .github/workflows/merge-guard-merge.yml — runs whenever the gate publishes.
 name: merge-guard merge
 

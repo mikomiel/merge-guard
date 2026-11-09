@@ -39,7 +39,6 @@ class Policy:
     reviewer_id: int
     reviewer_login: str
     reviewer_type: str
-    trusted_associations: frozenset[str]
     required_checks: tuple[str, ...]
     gate_context: str
     ordinary_paths: tuple[str, ...]
@@ -58,10 +57,9 @@ def load_policy(data: Any) -> Policy:
         reviewer_id = review["reviewer_id"]
         reviewer_login = review["reviewer_login"]
         reviewer_type = review.get("reviewer_type", "Bot")
-        associations = tuple(review.get("trusted_associations", []))
-        checks = tuple(review["required_checks"])
+        checks = review["required_checks"]
         gate = review.get("gate_context", "review")
-        ordinary = tuple(paths.get("ordinary", []))
+        ordinary = paths.get("ordinary", [])
         exemption = bool(paths.get("dependency_update_exemption", False))
         review_workflow = review.get("review_workflow", "merge-guard-review.yml")
         merge_workflow = review.get("merge_workflow", "merge-guard-merge.yml")
@@ -74,14 +72,16 @@ def load_policy(data: Any) -> Policy:
         raise Unusable("policy_identity_invalid")
     if type(reviewer_id) is not int or reviewer_id < 1:
         raise Unusable("policy_reviewer_id_invalid")
-    if not checks or not all(isinstance(x, str) and x for x in checks):
+    if not isinstance(checks, (list, tuple)) or not checks or not all(
+            isinstance(x, str) and x for x in checks):
         raise Unusable("policy_required_checks_invalid")
-    if not all(isinstance(x, str) and x for x in associations):
-        raise Unusable("policy_associations_invalid")
-    if not all(isinstance(x, str) and x for x in ordinary):
+    if not isinstance(ordinary, (list, tuple)) or not all(
+            isinstance(x, str) and bool(x) for x in ordinary):
         raise Unusable("policy_ordinary_paths_invalid")
+    if not isinstance(data.get("paths", {}).get("dependency_update_exemption", False), bool):
+        raise Unusable("policy_dependency_exemption_invalid")
     return Policy(repository, base_branch, reviewer_id, reviewer_login, reviewer_type,
-                  frozenset(associations), checks, gate, ordinary, exemption,
+                  tuple(checks), gate, tuple(ordinary), exemption,
                   review_workflow, merge_workflow)
 
 
@@ -281,7 +281,7 @@ def ordinary(path: str, policy: Policy) -> bool:
 def dependency_update_only(paths: list[str], policy: Policy) -> bool:
     """A root-manifest bump only, and only when the consumer opted in."""
     return (
-        policy.dependency_update_exemption
+        policy.dependency_update_exemption is True
         and bool(paths)
         and all("/" not in path and PurePosixPath(path).name in DEPENDENCY_MANIFESTS for path in paths)
     )

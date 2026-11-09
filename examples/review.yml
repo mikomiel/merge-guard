@@ -1,3 +1,5 @@
+# Replace before use: `main` with the policy base_branch, `CI` with your CI
+# workflow's display name, and the merge-guard ref with the release SHA.
 # .github/workflows/merge-guard-review.yml — publishes the `review` status.
 # The job id is not `review`: a job named after the status context confuses
 # readers and the two are unrelated.
@@ -22,9 +24,12 @@ concurrency:
   group: merge-guard-review
   cancel-in-progress: false
 
+env:
+  BASE_BRANCH: main  # replace with the policy base_branch
+
 jobs:
   gate:
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.base.ref == 'main'
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.base.ref == env.BASE_BRANCH
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

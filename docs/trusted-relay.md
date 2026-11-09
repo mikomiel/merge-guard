@@ -30,7 +30,12 @@ The two rules that follow from this:
 
 ## The status, not the review decision
 
-The gate publishes the `review` commit status for the exact head SHA. Native
+The gate publishes the `review` commit status for the exact head SHA. That
+status must be written by `github-actions[bot]`: the `token` input cannot change
+which identity a workflow using the repository token gets, and the engine
+refuses a gate status published by anything else. Only the default-branch
+workflows hold `statuses: write`, and `trusted_context` pins the workflow file
+reference, so both halves are needed. Native
 `reviewDecision` is not an input: it is a derived value that GitHub recalculates
 and that drops approvals on a new commit in ways the gate cannot verify from a
 snapshot. The status records what the gate saw, for the head it saw it on.
