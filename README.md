@@ -28,8 +28,9 @@ integration until a tagged release says so.
 
 ## Use it in a repository
 
-1. Copy `examples/merge-guard.toml` to `.github/merge-guard.toml` and set the
-   reviewer identity, the required checks and the ordinary-path allowlist.
+1. Copy `examples/merge-guard.toml` to `.github/merge-guard.toml` and replace
+   every placeholder: `OWNER/REPO`, `REVIEWER[bot]`, its numeric `reviewer_id`,
+   `CHECKS`, the workflow file names and the ordinary-path allowlist.
 2. Add the three workflows from `examples/`: `review-relay.yml`,
    `review.yml` and `merge.yml`, pinning `mikomiel/merge-guard` by 40-hex SHA.
 3. Grant them the permissions each file declares and nothing more.

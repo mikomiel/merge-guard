@@ -1,20 +1,23 @@
-# Copy to .github/merge-guard.toml in the consumer repository.
-# This file is itself a sensitive path: changing it needs a human merge.
+# Copy to .github/merge-guard.toml in the consumer repository and replace every
+# placeholder. This file is itself a sensitive path: changing it needs a human
+# merge.
 
 [repository]
-name = "mikomiel/ci-burst"
+name = "OWNER/REPO"
 base_branch = "main"
 
 [review]
-# The reviewer identity the gate trusts for autostart. Native reviewDecision
-# is never an input.
-reviewer_login = "ecomwizards-gandalf[bot]"
+# The reviewer identity the gate trusts. The numeric id is required: a login
+# can be renamed, an id cannot. Native reviewDecision is never an input.
+reviewer_id = 0
+reviewer_login = "REVIEWER[bot]"
 reviewer_type = "Bot"
-# Association labels accepted as a manual fallback; the gate status still
-# requires the configured reviewer before a merge.
+# Association labels accepted as a manual fallback for the gate status only.
 trusted_associations = ["OWNER", "MEMBER"]
-required_checks = ["planning", "public-content"]
+required_checks = ["CHECKS"]
 gate_context = "review"
+review_workflow = "merge-guard-review.yml"
+merge_workflow = "merge-guard-merge.yml"
 
 [paths]
 # An allowlist. Anything not matched is human-only.
@@ -23,6 +26,6 @@ ordinary = [
   "CHANGELOG.md",
   "docs/**",
 ]
-# Off by default: a dependency bump in a lock file is still a human decision
-# unless a repository explicitly opts in.
+# Off by default: even a root-manifest bump is a human decision unless the
+# repository opts in.
 dependency_update_exemption = false

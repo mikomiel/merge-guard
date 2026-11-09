@@ -1,13 +1,16 @@
 # .github/workflows/merge-guard-review.yml — publishes the `review` status.
+# The job id is not `review`: a job named after the status context confuses
+# readers and the two are unrelated.
 name: merge-guard review
 
 on:
   workflow_run:
-    workflows: ["review relay"]
+    workflows: ["CI", "review relay"]
     types: [completed]
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-  workflow_dispatch:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
@@ -15,12 +18,23 @@ permissions:
   checks: read
   statuses: write
 
+concurrency:
+  group: merge-guard-review
+  cancel-in-progress: false
+
 jobs:
-  review:
+  gate:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - uses: mikomiel/merge-guard@0000000000000000000000000000000000000000  # pin the release SHA
         with:
           mode: review
           token: ${{ github.token }}
+        env:
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}

@@ -3,9 +3,8 @@ name: merge-guard merge
 
 on:
   workflow_run:
-    workflows: ["merge-guard review"]
+    workflows: ["CI", "merge-guard review"]
     types: [completed]
-  workflow_dispatch:
   schedule:
     - cron: "17 * * * *"
 
@@ -15,11 +14,19 @@ permissions:
   checks: read
   statuses: read
 
+concurrency:
+  group: merge-guard-merge
+  cancel-in-progress: false
+
 jobs:
   merge:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - uses: mikomiel/merge-guard@0000000000000000000000000000000000000000  # pin the release SHA
         with:
           mode: merge
