@@ -1,0 +1,28 @@
+# Copy to .github/merge-guard.toml in the consumer repository.
+# This file is itself a sensitive path: changing it needs a human merge.
+
+[repository]
+name = "mikomiel/ci-burst"
+base_branch = "main"
+
+[review]
+# The reviewer identity the gate trusts for autostart. Native reviewDecision
+# is never an input.
+reviewer_login = "ecomwizards-gandalf[bot]"
+reviewer_type = "Bot"
+# Association labels accepted as a manual fallback; the gate status still
+# requires the configured reviewer before a merge.
+trusted_associations = ["OWNER", "MEMBER"]
+required_checks = ["planning", "public-content"]
+gate_context = "review"
+
+[paths]
+# An allowlist. Anything not matched is human-only.
+ordinary = [
+  "README.md",
+  "CHANGELOG.md",
+  "docs/**",
+]
+# Off by default: a dependency bump in a lock file is still a human decision
+# unless a repository explicitly opts in.
+dependency_update_exemption = false

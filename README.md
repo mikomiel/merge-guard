@@ -25,6 +25,18 @@ integration until a tagged release says so.
 - **One owner per fact.** The classifier owns the rule that a path needs a
   stronger check; nothing else copies that list.
 
+
+## Use it in a repository
+
+1. Copy `examples/merge-guard.toml` to `.github/merge-guard.toml` and set the
+   reviewer identity, the required checks and the ordinary-path allowlist.
+2. Add the three workflows from `examples/`: `review-relay.yml`,
+   `review.yml` and `merge.yml`, pinning `mikomiel/merge-guard` by 40-hex SHA.
+3. Grant them the permissions each file declares and nothing more.
+
+Read [docs/trusted-relay.md](docs/trusted-relay.md) before changing the
+triggers: the relay is what makes the writes trustworthy.
+
 ## Development
 
 The gate is Python, standard library where it can be, so a forge integration

@@ -1,0 +1,22 @@
+name: merge-guard
+description: Publish the review status for a pull request head, or merge one eligible pull request.
+inputs:
+  mode:
+    description: "review publishes the gate status; merge lands one eligible pull request."
+    required: true
+  policy:
+    description: Path to the consumer policy file, relative to the repository root.
+    required: false
+    default: .github/merge-guard.toml
+  token:
+    description: Token used by `gh`. Defaults to the workflow token.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: merge-guard ${{ inputs.mode }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token || github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "${{ inputs.mode }}" --apply --policy "${{ inputs.policy }}"

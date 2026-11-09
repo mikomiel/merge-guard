@@ -1,0 +1,26 @@
+# .github/workflows/merge-guard-merge.yml — runs whenever the gate publishes.
+name: merge-guard merge
+
+on:
+  workflow_run:
+    workflows: ["merge-guard review"]
+    types: [completed]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: mikomiel/merge-guard@0000000000000000000000000000000000000000  # pin the release SHA
+        with:
+          mode: merge
+          token: ${{ github.token }}
