@@ -1,0 +1,44 @@
+# Replace before use: `main` with the policy base_branch, `CI` with your CI
+# workflow's display name, and the merge-guard ref with the release SHA.
+# .github/workflows/merge-guard-review.yml — publishes the `review` status.
+# The job id is not `review`: a job named after the status context confuses
+# readers and the two are unrelated.
+name: merge-guard review
+
+on:
+  workflow_run:
+    workflows: ["CI", "review relay"]
+    types: [completed]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: write
+
+concurrency:
+  group: merge-guard-review
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    # GitHub allows only github/needs/vars/inputs in a job-level `if`.
+    # Replace 'main' with the policy base_branch.
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: mikomiel/merge-guard@0000000000000000000000000000000000000000  # pin the release SHA
+        with:
+          mode: review
+          token: ${{ github.token }}
+        env:
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}

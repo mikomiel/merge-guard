@@ -1,0 +1,16 @@
+# .github/workflows/review-relay.yml — a no-op that makes review events
+# trusted. `pull_request_review` cannot run code with write permissions, so
+# it only wakes the workflows that can, through `workflow_run`.
+name: review relay
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "review event relayed to the trusted merge-guard workflows"
