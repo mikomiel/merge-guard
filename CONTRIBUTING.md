@@ -11,7 +11,7 @@
 
 A pull request lands only after an independent review approves the exact head
 and CI is green on that same head. A new commit needs a new review and a new
-run. The repository's controlled automation merges; the author does not.
+run. Until the gate in issue #2 lands here, a person merges after the review approves the exact head and CI is green; the author does not merge their own pull request.
 
 ## Public by construction
 
