@@ -247,6 +247,14 @@ def carried_heads(api: GitHub, pr: dict[str, Any], reviews: list[Any],
     previous = _patch_snapshot(api.compare(base, old))
     if current is None or previous is None or not current:
         return set()
+    changed = pr.get("changed_files")
+    # The compare endpoint returns at most 300 files without paging. A truncated
+    # list would compare only the visible files, so a difference past the cap
+    # could carry an approval it should not.
+    if type(changed) is not int or changed < 1 or len(current) != changed:
+        return set()
+    if len(current) >= 300 or len(previous) >= 300:
+        return set()
     return {old} if current == previous else set()
 
 

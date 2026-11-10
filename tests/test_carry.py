@@ -89,3 +89,10 @@ def test_the_plan_carries_the_description_to_the_status():
     pr_data = dict(pr(), reviews=[review("APPROVED", OLD)], maintainers=[], carried_heads=[OLD])
     plan = mg.review_plan([pr_data], policy())
     assert plan[HEAD] == ("success", "approved at cccccccccccc (carried, unchanged diff)")
+
+
+def test_a_truncated_file_list_does_not_carry():
+    many = [file(f"docs/{index}.md") for index in range(300)]
+    api = Compare(comparison(*many), comparison(*many))
+    pr_data = dict(pr(), changed_files=301)
+    assert runner.carried_heads(api, pr_data, [review("APPROVED", OLD)], policy()) == set()
