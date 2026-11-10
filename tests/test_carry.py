@@ -23,8 +23,8 @@ def review(state, commit, rid=1):
             "user": {"id": REVIEWER_ID, "login": "reviewer[bot]", "type": "Bot"}}
 
 
-def pr(head=HEAD):
-    return {"number": 1, "state": "open", "draft": False,
+def pr(head=HEAD, changed_files=1):
+    return {"number": 1, "state": "open", "draft": False, "changed_files": changed_files,
             "base": {"ref": "main", "sha": BASE, "repo": {"full_name": "o/r"}},
             "head": {"sha": head}, "user": {"login": "author"}}
 
@@ -62,7 +62,7 @@ def test_a_changed_hunk_does_not_carry():
 
 def test_an_extra_file_does_not_carry():
     api = Compare(comparison(file(), file("docs/x.md")), comparison(file()))
-    assert runner.carried_heads(api, pr(), [review("APPROVED", OLD)], policy()) == set()
+    assert runner.carried_heads(api, pr(changed_files=2), [review("APPROVED", OLD)], policy()) == set()
 
 
 def test_a_conflict_resolution_that_changes_the_patch_does_not_carry():
