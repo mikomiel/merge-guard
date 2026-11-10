@@ -43,6 +43,17 @@ integration until a tagged release says so.
 Read [docs/trusted-relay.md](docs/trusted-relay.md) before changing the
 triggers: the relay is what makes the writes trustworthy.
 
+## Carried approvals
+
+Required branches-up-to-date stays on, so a base advance normally invalidates
+an exact-head approval. When a person updates the branch, the engine carries
+the configured reviewer's latest approval from the previous head **only if the
+pull request's own patch is identical**: same files, same statuses, same patch
+text, renames included. A changed hunk, an extra file, a conflict-resolution
+merge that changes the patch, or a file whose patch GitHub does not return
+(binary or too large) means no carry-over. The published status says
+`approved at <old head> (carried, unchanged diff)` so the reviewer is visible.
+
 ## Development
 
 The gate is Python, standard library where it can be, so a forge integration

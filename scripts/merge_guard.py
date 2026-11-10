@@ -194,6 +194,70 @@ def maintainer_ids(api: GitHub, reviews: Any, author: str) -> set[int]:
     return ids
 
 
+def _carried_review(reviews: list[Any], head: str, policy: mg.Policy) -> str | None:
+    """The configured reviewer's latest decisive review, when it approved an older head."""
+    latest: dict[str, Any] | None = None
+    for item in reviews:
+        if not isinstance(item, dict):
+            continue
+        user = item.get("user")
+        if not isinstance(user, dict) or not mg.is_configured_reviewer(user, policy):
+            continue
+        if item.get("state") not in mg.DECISIVE or type(item.get("id")) is not int:
+            continue
+        if latest is None or item["id"] > latest["id"]:
+            latest = item
+    if latest is None or latest["state"] != "APPROVED":
+        return None
+    commit = latest.get("commit_id")
+    if not mg.valid_sha(commit) or commit == head:
+        return None
+    return commit
+
+
+def _patch_snapshot(comparison: Any) -> list[tuple[Any, Any, Any, Any]] | None:
+    """Every file's own patch, or None when any patch is missing (binary, too large)."""
+    if not isinstance(comparison, dict):
+        return None
+    items = comparison.get("files")
+    if not isinstance(items, list):
+        return None
+    snapshot = []
+    for item in items:
+        if not isinstance(item, dict) or "patch" not in item:
+            return None
+        snapshot.append((item.get("filename"), item.get("previous_filename"),
+                         item.get("status"), item.get("patch")))
+    return sorted(snapshot, key=lambda row: (str(row[0]), str(row[1])))
+
+
+def carried_heads(api: GitHub, pr: dict[str, Any], reviews: list[Any],
+                  policy: mg.Policy) -> set[str]:
+    """Heads the reviewer approved whose own change is identical to the current one.
+
+    Both sides are the same comparison shape: the current base against the head,
+    and the current base against the older head. That is the pull request's own
+    change in each case, including renames and conflict-resolution merges.
+    """
+    old = _carried_review(reviews, pr["head"]["sha"], policy)
+    if old is None:
+        return set()
+    base, head = pr["base"]["sha"], pr["head"]["sha"]
+    current = _patch_snapshot(api.compare(base, head))
+    previous = _patch_snapshot(api.compare(base, old))
+    if current is None or previous is None or not current:
+        return set()
+    changed = pr.get("changed_files")
+    # The compare endpoint returns at most 300 files without paging. A truncated
+    # list would compare only the visible files, so a difference past the cap
+    # could carry an approval it should not.
+    if type(changed) is not int or changed < 1 or len(current) != changed:
+        return set()
+    if len(current) >= 300 or len(previous) >= 300:
+        return set()
+    return {old} if current == previous else set()
+
+
 def collect_reviews(api: GitHub, known_heads: set[str], policy: mg.Policy) -> list[dict[str, Any]]:
     """List first (recording every head), then deep-read each open pull."""
     listing = api.pulls()
@@ -215,6 +279,7 @@ def collect_reviews(api: GitHub, known_heads: set[str], policy: mg.Policy) -> li
             raise ApiError("github_pull_scope_unusable")
         pr["reviews"] = api.reviews(pr["number"])
         pr["maintainers"] = sorted(maintainer_ids(api, pr["reviews"], pr["user"]["login"]))
+        pr["carried_heads"] = sorted(carried_heads(api, pr, pr["reviews"], policy))
         snapshot.append(pr)
     return snapshot
 
@@ -281,9 +346,10 @@ def run_merge(api: GitHub, policy: mg.Policy, apply: bool) -> list[dict[str, Any
         reviews = api.reviews(number)
         maintainers = maintainer_ids(api, reviews, current["user"]["login"])
         comparison = api.compare(current["base"]["sha"], head)
+        carried = carried_heads(api, current, reviews, policy)
         eligible, reason = mg.merge_decision(
             current, reviews, api.check_runs(head), api.statuses(head), comparison,
-            maintainers, policy)
+            maintainers, policy, carried)
         decision.update(eligible=eligible, reason=reason)
         if eligible and apply:
             api.merge(number, head)

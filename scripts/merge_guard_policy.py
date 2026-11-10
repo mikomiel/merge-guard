@@ -94,7 +94,8 @@ def is_configured_reviewer(user: dict[str, Any], policy: Policy) -> bool:
         policy.reviewer_id, policy.reviewer_login, policy.reviewer_type)
 
 
-def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, policy: Policy) -> tuple[str, str]:
+def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, policy: Policy,
+                   carried: Any = frozenset()) -> tuple[str, str]:
     """Latest decisive state per verified identity; any change request blocks.
 
     ``maintainers`` holds numeric user ids the API verified as write/maintain/
@@ -105,6 +106,8 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
         raise Unusable("invalid_review_snapshot")
     if not isinstance(maintainers, (set, frozenset)):
         raise Unusable("invalid_maintainer_set")
+    if not isinstance(carried, (set, frozenset)):
+        raise Unusable("invalid_carried_set")
     latest: dict[int, dict[str, Any]] = {}
     for item in reviews:
         if not isinstance(item, dict):
@@ -128,8 +131,13 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
             latest[user["id"]] = item
     if any(x["state"] == "CHANGES_REQUESTED" for x in latest.values()):
         return "failure", "changes_requested"
-    if any(x["state"] == "APPROVED" and x["commit_id"] == head for x in latest.values()):
-        return "success", "approved_at_head"
+    for item in latest.values():
+        if item["state"] != "APPROVED":
+            continue
+        if item["commit_id"] == head:
+            return "success", "approved_at_head"
+        if item["commit_id"] in carried:
+            return "success", f"approved at {item['commit_id'][:12]} (carried, unchanged diff)"
     return "pending", "current_head_approval_required"
 
 
@@ -163,7 +171,8 @@ def review_plan(prs: Any, policy: Policy) -> dict[str, tuple[str, str]]:
             raise Unusable("invalid_pull_scope")
         head = pr["head"]["sha"]
         state, reason = review_verdict(
-            pr.get("reviews"), head, pr["user"]["login"], set(pr.get("maintainers", ())), policy)
+            pr.get("reviews"), head, pr["user"]["login"], set(pr.get("maintainers", ())),
+            policy, frozenset(pr.get("carried_heads", ())))
         if pr["draft"]:
             state, reason = "pending", "pull_request_is_draft"
         if head not in result or SEVERITY[state] > SEVERITY[result[head][0]]:
@@ -288,19 +297,21 @@ def dependency_update_only(paths: list[str], policy: Policy) -> bool:
 
 
 def merge_decision(pr: Any, reviews: Any, runs: Any, statuses: Any, comparison: Any,
-                   maintainers: Any, policy: Policy) -> tuple[bool, str]:
+                   maintainers: Any, policy: Policy,
+                   carried: Any = frozenset()) -> tuple[bool, str]:
     try:
         if not pull_scope(pr, policy) or pr["draft"]:
             return False, "pull_not_ready"
         if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
             return False, "mergeability_not_clean"
         state, reason = review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"],
-                                       maintainers, policy)
+                                       maintainers, policy, carried)
         if state != "success":
             return False, reason
         # A verified maintainer can approve, but unattended ordinary-area merges
         # still require the configured reviewer at this head.
-        if review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"], set(), policy)[0] != "success":
+        if review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"], set(), policy,
+                          carried)[0] != "success":
             return False, "configured_reviewer_required_for_automerge"
         green, reason = checks_green(runs, statuses, pr["head"]["sha"], policy)
         if not green:
