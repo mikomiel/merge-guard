@@ -30,10 +30,10 @@ SEVERITY = {"success": 0, "pending": 1, "failure": 2}
 # A review and the commit it names are timestamped by different clocks: the
 # review's server timestamp by the forge, the commit's own committer date by
 # whoever authored it. Clock skew between them must not reject a genuine
-# approval, and 300 s is far below any real "the head moved after the review"
-# gap. It is a plausibility check, not a proof: a head timestamped inside the
-# tolerance, or one whose date was written to look older, still reads as
-# approved (issue #20).
+# approval, and 300 s allows limited clock skew and nothing more. It is a
+# plausibility check, not a proof: a head timestamped inside the tolerance, or
+# one whose date was written to look older, still reads as approved
+# (issue #20).
 REVIEW_ASSOCIATION_TOLERANCE_SECONDS = 300
 
 
