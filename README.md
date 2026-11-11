@@ -10,9 +10,14 @@ classifier and the check profile it selects — and the rest of the gate follows
 
 ## Status
 
-Pre-release. The repository is public from its first commit; no artefact is
-published yet. There is no package, no container image and no supported
-integration until a tagged release says so.
+Pre-release. `v0.0.1` is a walking skeleton: it releases the change classifier as
+one standard-library file, and the [release
+notes](https://github.com/mikomiel/merge-guard/releases/tag/v0.0.1) state what it
+does not cover yet. There is no package and no container image.
+
+The composite action is installable today and pinned by commit SHA — see [Use it
+in a repository](#use-it-in-a-repository). This repository runs that same gate on
+its own pull requests; `.github/merge-guard.toml` is its policy.
 
 ## Design principles
 
