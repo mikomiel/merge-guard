@@ -18,7 +18,8 @@ file, which release it came from. The copy is generated, never authored.
    name it.
 3. **Record the pin.** One manifest beside the copy, holding the product, the
    version, the source commit, and for each file its source path and its
-   SHA-256. Generate the digests with `sha256sum`; do not type them.
+   SHA-256. Generate the digests with `sha256sum`; do not type them, and commit
+   the manifest with the copy so the record and the bytes move together.
 4. **Enforce it in your own checks.** The check must compare the tree against the
    manifest in both directions: a file whose digest differs, a file the manifest
    names and the tree lacks, and a file the tree carries and the manifest does
