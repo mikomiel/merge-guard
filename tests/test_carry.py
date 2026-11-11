@@ -95,6 +95,15 @@ def test_the_plan_carries_the_description_to_the_status():
     assert plan[HEAD] == ("success", "approved at cccccccccccc (carried, unchanged diff)")
 
 
+def test_a_stale_approval_plans_a_refusal_in_review_mode():
+    # Review mode publishes what review_plan decides, so a head that postdates
+    # the approval must plan a refusal rather than `approved_at_head` (#15).
+    pr_data = dict(pr(), reviews=[review("APPROVED", HEAD)], maintainers=[],
+                   carried_heads=[], head_committed_at="2026-11-11T08:04:39Z")
+    assert mg.review_plan([pr_data], policy())[HEAD] == (
+        "pending", "current_head_approval_required")
+
+
 def test_a_truncated_file_list_does_not_carry():
     many = [file(f"docs/{index}.md") for index in range(300)]
     api = Compare(comparison(*many), comparison(*many))

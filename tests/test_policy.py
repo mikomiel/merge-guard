@@ -190,6 +190,47 @@ def test_a_comparison_without_commits_is_refused():
     assert decide(comparison_data=stripped) == (False, "invalid_comparison_commits")
 
 
+def test_the_tolerance_boundary_is_exactly_300_seconds():
+    # 300 s of clock skew is allowed and one second more is not, so the rule
+    # cannot drift into admitting a head that moved after the review.
+    assert mg.review_verdict(
+        [review("APPROVED", submitted_at="2026-11-11T07:24:06Z")], HEAD, "author", set(),
+        make_policy(), HEAD_COMMITTED_AT) == ("success", "approved_at_head")
+    assert mg.review_verdict(
+        [review("APPROVED", submitted_at="2026-11-11T07:24:05Z")], HEAD, "author", set(),
+        make_policy(), HEAD_COMMITTED_AT) == ("pending", "current_head_approval_required")
+
+
+def test_equivalent_instants_in_different_offsets_compare_as_one_instant():
+    # 08:29:06+01:00 is 07:29:06Z, so the approval is at the head, not before it.
+    assert mg.review_verdict(
+        [review("APPROVED", submitted_at="2026-11-11T08:29:06+01:00")], HEAD, "author", set(),
+        make_policy(), HEAD_COMMITTED_AT) == ("success", "approved_at_head")
+
+
+def test_a_timestamp_without_an_offset_is_refused():
+    # An offset-free stamp cannot be ordered against the other side, so it is
+    # unusable rather than assumed to be UTC.
+    with pytest.raises(mg.Unusable, match="invalid_review_submitted_at"):
+        mg.review_verdict([review("APPROVED", submitted_at="2026-11-11T07:30:30")], HEAD,
+                          "author", set(), make_policy(), HEAD_COMMITTED_AT)
+
+
+def test_an_empty_comparison_commit_list_is_refused():
+    empty = comparison(["README.md"])
+    empty["commits"] = []
+    assert decide(comparison_data=empty) == (False, "invalid_comparison_commits")
+
+
+def test_a_backdated_head_is_a_documented_limit():
+    # A committer date is chosen by whoever creates the commit, so a head with a
+    # forged date still reads as approved. Issue #20 owns closing that gap; this
+    # test pins the limit so it cannot be mistaken for a proof of intent.
+    assert mg.review_verdict(
+        [review("APPROVED", submitted_at="2026-11-11T07:30:30Z")], HEAD, "author", set(),
+        make_policy(), "2026-11-11T07:29:06Z") == ("success", "approved_at_head")
+
+
 def test_policy_requires_a_reviewer_id():
     with pytest.raises(mg.Unusable):
         mg.load_policy({"repository": {"name": "o/r", "base_branch": "main"},

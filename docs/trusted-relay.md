@@ -49,11 +49,19 @@ snapshot. The status records what the gate saw, for the head it saw it on.
 
 ## What an approval proves
 
-An approval counts only when the review could have seen the head. The gate
-compares the review's `submitted_at` with the head commit's own committer date,
-and refuses `approved_at_head` when the head committed more than 300 seconds
-after the review was submitted. A review cannot be evidence for a commit that
-did not exist when it was written.
+The gate counts an approval of `head` only when the review could have seen it.
+It compares the review's `submitted_at` — the forge's own timestamp — with the
+head commit's committer date, and refuses `approved_at_head` when the head
+committed more than 300 seconds after the review was submitted.
+
+This is a narrowing, not a proof, and the difference matters. It rejects the
+association observed in practice, where the forge reassigned a review to a head
+created 34 minutes after it was submitted (#15). It cannot establish what the
+reviewer read: a committer date is chosen by whoever creates the commit, so a
+head authored with a backdated date defeats the comparison. Closing that gap
+needs an assurance the forge does not own — a review body naming the head it
+reviewed, or a trusted record of the association at review time — which this
+gate does not yet require (issue #20).
 
 `commit_id` alone is not trusted. The forge can reassign it to a commit that did
 not exist at submission time, and `original_commit_id` is `null` in observed
