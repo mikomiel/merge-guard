@@ -50,5 +50,8 @@ A bump is the same procedure with a different tag. Nothing is edited in place:
 
 ## Rolling back
 
-Restore the previous implementation from your own history and delete the vendor
-tree. The earlier release remains available; a pin is not a migration.
+Restore the previous implementation from your own history, delete the vendor
+tree, and put the manifest and the check back with it: a check that still looks
+for files you have deleted reports them missing, and an entrypoint that still
+delegates has nothing left to delegate to. The earlier release remains
+available; a pin is not a migration.
