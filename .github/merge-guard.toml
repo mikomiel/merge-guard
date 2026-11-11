@@ -17,6 +17,10 @@ required_checks = ["checks"]
 gate_context = "review"
 review_workflow = "merge-guard-review.yml"
 merge_workflow = "merge-guard-merge.yml"
+# Every approval binds to the commit it was given for. An identical patch on a
+# new head inherits nothing, so a force-push-free base update still needs a
+# fresh approval here.
+carry_unchanged_diff = false
 
 [paths]
 # An allowlist. Anything not matched is human-only: `scripts/`, `tests/`,
