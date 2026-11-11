@@ -10,10 +10,12 @@ classifier and the check profile it selects — and the rest of the gate follows
 
 ## Status
 
-Pre-release. `v0.0.1` is a walking skeleton: it releases the change classifier as
-one standard-library file, and the [release
-notes](https://github.com/mikomiel/merge-guard/releases/tag/v0.0.1) state what it
-does not cover yet. There is no package and no container image.
+Pre-release. `v0.0.2` is current: it carries the approval rule — an approval
+counts only if the review could have seen the head — and the [release
+notes](https://github.com/mikomiel/merge-guard/releases/tag/v0.0.2) state what
+that still does not prove. `v0.0.1` released the change classifier as one
+standard-library file, unchanged since. There is no package and no container
+image.
 
 The composite action is installable today and pinned by commit SHA — see [Use it
 in a repository](#use-it-in-a-repository). This repository runs that same gate on
