@@ -79,7 +79,7 @@ lint and tests once there is code:
 python3 scripts/check_estate_identifiers.py
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). When a pull request cannot merge and the reason is not obvious, [docs/troubleshooting.md](docs/troubleshooting.md) covers the missed-trigger case and what the gate's status descriptions mean.
 
 ## Licence
 
