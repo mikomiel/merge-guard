@@ -201,11 +201,20 @@ def test_the_tolerance_boundary_is_exactly_300_seconds():
         make_policy(), HEAD_COMMITTED_AT) == ("pending", "current_head_approval_required")
 
 
-def test_equivalent_instants_in_different_offsets_compare_as_one_instant():
-    # 08:29:06+01:00 is 07:29:06Z, so the approval is at the head, not before it.
-    assert mg.review_verdict(
-        [review("APPROVED", submitted_at="2026-11-11T08:29:06+01:00")], HEAD, "author", set(),
-        make_policy(), HEAD_COMMITTED_AT) == ("success", "approved_at_head")
+def test_offset_bearing_timestamps_are_ordered_as_instants():
+    # 08:24:06+01:00 is 07:24:06Z, the 300 s boundary, and 08:24:05+01:00 is one
+    # second past it. Both cases would pass if the offset were dropped and the
+    # clock read as UTC, so they are what makes this an ordering test.
+    def verdict(submitted_at):
+        return mg.review_verdict(
+            [review("APPROVED", submitted_at=submitted_at)], HEAD, "author", set(),
+            make_policy(), HEAD_COMMITTED_AT)
+
+    assert verdict("2026-11-11T08:24:06+01:00") == ("success", "approved_at_head")
+    assert verdict("2026-11-11T08:24:05+01:00") == (
+        "pending", "current_head_approval_required")
+    # The same instant written in UTC and with an offset is one instant.
+    assert verdict("2026-11-11T08:29:06+01:00") == ("success", "approved_at_head")
 
 
 def test_a_timestamp_without_an_offset_is_refused():

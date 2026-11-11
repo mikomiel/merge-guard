@@ -49,10 +49,10 @@ snapshot. The status records what the gate saw, for the head it saw it on.
 
 ## What an approval proves
 
-The gate counts an approval of `head` only when the review could have seen it.
-It compares the review's `submitted_at` — the forge's own timestamp — with the
-head commit's committer date, and refuses `approved_at_head` when the head
-committed more than 300 seconds after the review was submitted.
+The gate applies a timestamp plausibility check to an approval of `head`. It
+compares the review's `submitted_at` — the forge's own timestamp — with the head
+commit's committer date, and refuses `approved_at_head` when the head committed
+more than 300 seconds after the review was submitted.
 
 This is a narrowing, not a proof, and the difference matters. It rejects the
 association observed in practice, where the forge reassigned a review to a head
