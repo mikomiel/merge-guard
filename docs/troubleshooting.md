@@ -8,42 +8,48 @@ protection rule is `strict`, so the pull request cannot merge, and with
 `enforce_admins` on there is no manual override.
 
 **Cause.** `pull_request` workflows fire on `opened`, `synchronize` and
-`reopened`. Some branch updates do not produce an event that GitHub dispatches
-as a synchronize for the new head — a base merge performed with a user token or
-through the update-branch API is the case observed in issue #14. The head then
-exists with no run against it, and a required context that has never reported
-cannot be satisfied.
+`reopened`. In the case reported in issue #14 a base merge left the new head with
+no `checks` run while the gate's own workflow did run for it. Why GitHub did not
+dispatch a run for that head is not established from the workflows alone; what is
+established is the consequence, and that a new event fixes it.
 
-**Recovery.** Any of these makes GitHub dispatch a new event for the head:
+**Recovery.** Either of these makes GitHub dispatch a new event for the head, and
+both also re-run the gate so the head gets a fresh `review` status:
 
 - close the pull request and reopen it;
-- push any commit to the branch;
-- re-run the missing workflow from the Actions tab for that ref.
+- push any commit to the branch.
 
-The first two also re-run the gate, so the new head gets a fresh `review`
-status. Prefer reopening: it leaves the branch's history untouched.
+Prefer reopening: it leaves the branch's history untouched.
+
+Re-running an older workflow run is **not** a recovery. A re-run acts on that
+run's own SHA, so it produces no evidence for the new head, and `checks.yml` here
+has no `workflow_dispatch` trigger to start one for the current head.
 
 ## The gate says `pending` and the review looks approved
 
 Read the status description. `approved_at_head` means the approval is at this
-head. `current_head_approval_required` means it is not, and one of these is why:
+head. `current_head_approval_required` means it is not, and here that has one
+cause: the approval was submitted for an earlier commit.
 
-- the approval was submitted for an earlier commit, and the diff has changed
-  since, so the unchanged-diff carry does not apply;
-- the approval was submitted before the head commit existed — the forge can
-  reassign a review's `commit_id`, and an approval cannot be evidence for a
-  commit that did not exist when it was written (issue #15).
+This repository sets `carry_unchanged_diff = false` in `.github/merge-guard.toml`,
+so an approval of an earlier head never carries — not after a base update, and not
+after a commit that leaves the patch identical. Every head needs its own approval.
 
-Request a fresh review of the current head rather than re-running the workflow:
-nothing about the old approval changes by re-reading it.
+Request a fresh review of the current head rather than re-running the review
+workflow: re-reading the old approval cannot change what it approved.
 
 ## A pull request is approved, green, and still not merged
 
 Check, in this order:
 
-1. `required_checks` in `.github/merge-guard.toml` — every one must have a
-   completed, successful run **on this head**, from the Actions app.
-2. The policy's `sensitive` paths — a change under them needs a human review,
-   which the automation will not supply for itself.
-3. The base branch — `strict` refuses a head whose base has moved, and the
-   automation re-reads the exact head before merging.
+1. **The required checks, on this head.** Every name in `required_checks` needs a
+   completed, successful run for the exact head, from the Actions app. A run on an
+   earlier head does not count.
+2. **The ordinary-path allowlist.** The automation merges only paths listed under
+   `[paths].ordinary` — here `README.md`, `CHANGELOG.md` and `docs/**`. Anything
+   else, including this repository's own `scripts/` and `tests/`, is refused by
+   the merge decision itself: a person reviews it and a person merges it. That is
+   the rule, not a stuck queue, and no amount of approval changes it.
+3. **The base branch.** Protection is `strict`, so a head whose base has moved is
+   refused until the branch is updated; the automation re-reads the exact head
+   before merging.
