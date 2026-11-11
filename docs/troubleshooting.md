@@ -27,16 +27,22 @@ has no `workflow_dispatch` trigger to start one for the current head.
 
 ## The gate says `pending` and the review looks approved
 
-Read the status description. `approved_at_head` means the approval is at this
-head. `current_head_approval_required` means it is not, and here that has one
-cause: the approval was submitted for an earlier commit.
+Read the status description. `approved_at_head` means a qualifying approval is at
+this head. `current_head_approval_required` means none is, and two causes are
+worth checking:
 
-This repository sets `carry_unchanged_diff = false` in `.github/merge-guard.toml`,
-so an approval of an earlier head never carries — not after a base update, and not
-after a commit that leaves the patch identical. Every head needs its own approval.
+- **The approval is at an earlier commit.** This repository sets
+  `carry_unchanged_diff = false` in `.github/merge-guard.toml`, so an approval of
+  an earlier head never carries — not after a base update, and not after a commit
+  that leaves the patch identical. Every head needs its own approval.
+- **The approving identity does not qualify.** Only the configured reviewer, or a
+  user the API reports as write, maintain or admin, counts. A review from anyone
+  else leaves the status pending however visible the approval looks, and asking
+  that same person again will not change it.
 
-Request a fresh review of the current head rather than re-running the review
-workflow: re-reading the old approval cannot change what it approved.
+Request a fresh review of the current head, from a qualifying reviewer, rather
+than re-running the review workflow: re-reading the old approval cannot change
+either fact.
 
 ## A pull request is approved, green, and still not merged
 
