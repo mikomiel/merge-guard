@@ -115,6 +115,11 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
         raise Unusable("invalid_maintainer_set")
     if not isinstance(carried, (set, frozenset)):
         raise Unusable("invalid_carried_set")
+    if not policy.carry_unchanged_diff:
+        # The runner never supplies carry evidence under this policy. Zeroing it
+        # here as well means a direct caller of this function cannot reintroduce
+        # it, so the guarantee does not depend on one call site remembering.
+        carried = frozenset()
     latest: dict[int, dict[str, Any]] = {}
     for item in reviews:
         if not isinstance(item, dict):

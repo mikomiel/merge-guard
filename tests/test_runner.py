@@ -226,3 +226,51 @@ def test_publish_republishes_when_the_official_status_was_not_from_the_bot():
     api.request = lambda path, method="GET", body=None: posts.append((method, path))
     api.publish(HEAD, "success", "approved_at_head")
     assert [path for method, path in posts if method == "POST"]
+
+
+OLD_HEAD = "c" * 40
+
+
+def strict_policy():
+    return mg.load_policy({
+        "repository": {"name": "o/r", "base_branch": "main"},
+        "review": {"reviewer_id": REVIEWER_ID, "reviewer_login": "reviewer[bot]",
+                   "required_checks": ["checks"], "gate_context": "review",
+                   "carry_unchanged_diff": False},
+        "paths": {"ordinary": ["README.md"]},
+    })
+
+
+class Carrying(Fake):
+    """The same patch at both heads, so carry-over is possible at all."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.reviews_by = {"default": [review(commit="c" * 40)]}
+
+    def compare(self, base, head):
+        return {"status": "ahead", "base_commit": {"sha": base},
+                "merge_base_commit": {"sha": base},
+                "files": [{"filename": "README.md", "status": "modified",
+                           "patch": "@@ -1 +1 @@\n-a\n+b"}]}
+
+
+def test_a_carried_approval_merges_under_the_default_policy():
+    fake = Carrying()
+    decisions = runner.run_merge(fake, policy(), apply=True)
+    assert decisions[0]["merged"] is True
+    assert fake.merged == [(1, HEAD)]
+
+
+def test_a_carried_approval_never_merges_under_a_strict_policy():
+    fake = Carrying()
+    decisions = runner.run_merge(fake, strict_policy(), apply=True)
+    assert decisions[0]["eligible"] is False
+    assert decisions[0]["reason"] == "current_head_approval_required"
+    assert fake.merged == []
+
+
+def test_a_strict_policy_publishes_pending_for_a_carried_approval():
+    fake = Carrying()
+    runner.run_review(fake, strict_policy(), apply=True, event_head=None)
+    assert fake.published == [(HEAD, "pending", "current_head_approval_required")]
