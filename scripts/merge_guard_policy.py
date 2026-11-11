@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -26,6 +27,12 @@ DEPENDENCY_MANIFESTS = frozenset({
     "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "go.sum", "Cargo.lock",
 })
 SEVERITY = {"success": 0, "pending": 1, "failure": 2}
+# A review and the commit it names are timestamped by different clocks: the
+# review's server timestamp by the forge, the commit's own committer date by
+# whoever authored it. Clock skew between them must not reject a genuine
+# approval, and 300 s is far below any real "the head moved after the review"
+# gap, so it cannot admit a stale one.
+REVIEW_ASSOCIATION_TOLERANCE_SECONDS = 300
 
 
 class Unusable(ValueError):
@@ -101,13 +108,36 @@ def is_configured_reviewer(user: dict[str, Any], policy: Policy) -> bool:
         policy.reviewer_id, policy.reviewer_login, policy.reviewer_type)
 
 
+def _timestamp(value: Any, unusable: str) -> datetime:
+    """An ISO 8601 instant with an explicit offset; a trailing ``Z`` is UTC.
+
+    A timestamp without an offset cannot be ordered against the other side, so
+    it counts as unusable rather than being guessed at.
+    """
+    if not isinstance(value, str) or not value:
+        raise Unusable(unusable)
+    try:
+        stamp = datetime.fromisoformat(value)
+    except ValueError:
+        raise Unusable(unusable) from None
+    if stamp.tzinfo is None:
+        raise Unusable(unusable)
+    return stamp
+
+
 def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, policy: Policy,
-                   carried: Any = frozenset()) -> tuple[str, str]:
+                   head_committed_at: str, carried: Any = frozenset()) -> tuple[str, str]:
     """Latest decisive state per verified identity; any change request blocks.
 
     ``maintainers`` holds numeric user ids the API verified as write/maintain/
     admin. Association labels alone never grant that authority, and a review by
     the pull request author never counts.
+
+    An approval of ``head`` counts only when the review could have seen it. The
+    forge may reassign a review's ``commit_id`` to a commit that did not exist
+    at submission time, and ``original_commit_id`` is null in observed data, so
+    ``head_committed_at`` is required rather than optional: a caller that cannot
+    supply it cannot get ``approved_at_head``.
     """
     if not valid_sha(head) or not isinstance(reviews, list) or not author:
         raise Unusable("invalid_review_snapshot")
@@ -115,6 +145,7 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
         raise Unusable("invalid_maintainer_set")
     if not isinstance(carried, (set, frozenset)):
         raise Unusable("invalid_carried_set")
+    head_committed = _timestamp(head_committed_at, "invalid_head_commit_time")
     if not policy.carry_unchanged_diff:
         # The runner never supplies carry evidence under this policy. Zeroing it
         # here as well means a direct caller of this function cannot reintroduce
@@ -147,6 +178,12 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
         if item["state"] != "APPROVED":
             continue
         if item["commit_id"] == head:
+            submitted = _timestamp(item.get("submitted_at"), "invalid_review_submitted_at")
+            if submitted + timedelta(seconds=REVIEW_ASSOCIATION_TOLERANCE_SECONDS) < head_committed:
+                # The commit did not exist when this approval was written, so
+                # the approval says nothing about it. Let the carried branch and
+                # the final refusal decide instead of inventing a success.
+                continue
             return "success", "approved_at_head"
         if item["commit_id"] in carried:
             return "success", f"approved at {item['commit_id'][:12]} (carried, unchanged diff)"
@@ -174,7 +211,12 @@ def pull_scope(pr: Any, policy: Policy) -> bool:
 
 
 def review_plan(prs: Any, policy: Policy) -> dict[str, tuple[str, str]]:
-    """One verdict per SHA, worst open-PR verdict winning for a shared head."""
+    """One verdict per SHA, worst open-PR verdict winning for a shared head.
+
+    Each snapshot entry must carry ``head_committed_at``: the runner reads it
+    from the head commit itself, and an entry without it is unusable rather
+    than approved.
+    """
     if not isinstance(prs, list):
         raise Unusable("invalid_pull_snapshot")
     result: dict[str, tuple[str, str]] = {}
@@ -184,7 +226,7 @@ def review_plan(prs: Any, policy: Policy) -> dict[str, tuple[str, str]]:
         head = pr["head"]["sha"]
         state, reason = review_verdict(
             pr.get("reviews"), head, pr["user"]["login"], set(pr.get("maintainers", ())),
-            policy, frozenset(pr.get("carried_heads", ())))
+            policy, pr.get("head_committed_at"), frozenset(pr.get("carried_heads", ())))
         if pr["draft"]:
             state, reason = "pending", "pull_request_is_draft"
         if head not in result or SEVERITY[state] > SEVERITY[result[head][0]]:
@@ -308,6 +350,27 @@ def dependency_update_only(paths: list[str], policy: Policy) -> bool:
     )
 
 
+def _comparison_head_commit_time(comparison: Any, head: str) -> str:
+    """The head's own committer date, proven by the comparison's last commit.
+
+    A compare response is ordered base..head, so its last entry is the head only
+    when that entry says so. Anything else is a refusal, never a guess: a
+    timestamp taken from the wrong commit would support a head nobody reviewed.
+    """
+    commits = comparison.get("commits") if isinstance(comparison, dict) else None
+    if not isinstance(commits, list) or not commits:
+        raise Unusable("invalid_comparison_commits")
+    last = commits[-1]
+    if not isinstance(last, dict) or last.get("sha") != head:
+        raise Unusable("comparison_head_mismatch")
+    commit = last.get("commit")
+    committer = commit.get("committer") if isinstance(commit, dict) else None
+    date = committer.get("date") if isinstance(committer, dict) else None
+    if not isinstance(date, str) or not date:
+        raise Unusable("invalid_head_commit_time")
+    return date
+
+
 def merge_decision(pr: Any, reviews: Any, runs: Any, statuses: Any, comparison: Any,
                    maintainers: Any, policy: Policy,
                    carried: Any = frozenset()) -> tuple[bool, str]:
@@ -316,14 +379,15 @@ def merge_decision(pr: Any, reviews: Any, runs: Any, statuses: Any, comparison: 
             return False, "pull_not_ready"
         if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
             return False, "mergeability_not_clean"
+        head_committed_at = _comparison_head_commit_time(comparison, pr["head"]["sha"])
         state, reason = review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"],
-                                       maintainers, policy, carried)
+                                       maintainers, policy, head_committed_at, carried)
         if state != "success":
             return False, reason
         # A verified maintainer can approve, but unattended ordinary-area merges
         # still require the configured reviewer at this head.
         if review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"], set(), policy,
-                          carried)[0] != "success":
+                          head_committed_at, carried)[0] != "success":
             return False, "configured_reviewer_required_for_automerge"
         green, reason = checks_green(runs, statuses, pr["head"]["sha"], policy)
         if not green:

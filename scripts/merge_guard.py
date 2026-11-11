@@ -116,6 +116,24 @@ class GitHub:
     def compare(self, base: str, head: str) -> dict[str, Any]:
         return self.request(f"compare/{base}...{head}")
 
+    def commit_time(self, sha: str) -> str:
+        """The committer date the commit itself carries, read from that commit.
+
+        The date is part of the commit and cannot move, unlike a review's
+        ``commit_id``, which the forge may reassign after the fact.
+        """
+        if not mg.valid_sha(sha):
+            raise ApiError("invalid_head")
+        data = self.request(f"commits/{sha}")
+        if not isinstance(data, dict) or data.get("sha") != sha:
+            raise ApiError("commit_time_unusable")
+        commit = data.get("commit")
+        committer = commit.get("committer") if isinstance(commit, dict) else None
+        date = committer.get("date") if isinstance(committer, dict) else None
+        if not isinstance(date, str) or not date:
+            raise ApiError("commit_time_unusable")
+        return date
+
     def branch_head(self, branch: str) -> str:
         return self.request(f"git/ref/heads/{branch}").get("object", {}).get("sha", "")
 
@@ -284,6 +302,7 @@ def collect_reviews(api: GitHub, known_heads: set[str], policy: mg.Policy) -> li
         if not mg.pull_scope(pr, policy):
             raise ApiError("github_pull_scope_unusable")
         pr["reviews"] = api.reviews(pr["number"])
+        pr["head_committed_at"] = api.commit_time(pr["head"]["sha"])
         pr["maintainers"] = sorted(maintainer_ids(api, pr["reviews"], pr["user"]["login"]))
         pr["carried_heads"] = sorted(carried_heads(api, pr, pr["reviews"], policy))
         snapshot.append(pr)

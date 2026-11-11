@@ -11,6 +11,9 @@ HEAD = "a" * 40
 BASE = "b" * 40
 OLD = "c" * 40
 REVIEWER_ID = 42
+# The head commits at 07:29:06Z and the reviewer approves it a minute later.
+HEAD_COMMITTED_AT = "2026-11-11T07:29:06Z"
+REVIEW_SUBMITTED_AT = "2026-11-11T07:30:30Z"
 
 
 def make_policy(**overrides):
@@ -30,8 +33,9 @@ def make_policy(**overrides):
     return mg.load_policy(data)
 
 
-def review(state, commit=HEAD, login="reviewer[bot]", kind="Bot", rid=1, user_id=REVIEWER_ID):
-    return {"id": rid, "state": state, "commit_id": commit,
+def review(state, commit=HEAD, login="reviewer[bot]", kind="Bot", rid=1, user_id=REVIEWER_ID,
+           submitted_at=REVIEW_SUBMITTED_AT):
+    return {"id": rid, "state": state, "commit_id": commit, "submitted_at": submitted_at,
             "user": {"id": user_id, "login": login, "type": kind}}
 
 
@@ -45,8 +49,9 @@ def gate_status(state="success", login="github-actions[bot]", kind="Bot", rid=1)
             "creator": {"login": login, "type": kind}}
 
 
-def comparison(files, sha=BASE):
+def comparison(files, sha=BASE, head_committed_at=HEAD_COMMITTED_AT):
     return {"status": "ahead", "base_commit": {"sha": sha}, "merge_base_commit": {"sha": sha},
+            "commits": [{"sha": HEAD, "commit": {"committer": {"date": head_committed_at}}}],
             "files": [{"filename": f} if isinstance(f, str) else f for f in files]}
 
 
@@ -63,14 +68,16 @@ def pull(**over):
 
 
 def decide(policy=None, pr=None, reviews=None, runs=None, statuses=None, files=None,
-           maintainers=()):
+           maintainers=(), head_committed_at=HEAD_COMMITTED_AT, comparison_data=None):
     policy = policy or make_policy()
     return mg.merge_decision(
         pr or pull(),
         reviews if reviews is not None else [review("APPROVED")],
         runs if runs is not None else [run()],
         statuses if statuses is not None else [gate_status()],
-        comparison(files or ["README.md"]), set(maintainers), policy)
+        comparison_data if comparison_data is not None else comparison(
+            files or ["README.md"], head_committed_at=head_committed_at),
+        set(maintainers), policy)
 
 
 def test_draft_pull_request_is_not_eligible():
@@ -129,9 +136,58 @@ def test_changes_requested_by_the_reviewer_blocks():
 def test_maintainer_review_satisfies_the_verdict_but_not_automerge():
     maintainer = review("APPROVED", login="owner", kind="User", user_id=99)
     policy = make_policy()
-    assert mg.review_verdict([maintainer], HEAD, "author", {99}, policy)[0] == "success"
+    assert mg.review_verdict([maintainer], HEAD, "author", {99}, policy,
+                             HEAD_COMMITTED_AT)[0] == "success"
     assert decide(policy=policy, reviews=[maintainer], maintainers=[99]) == (
         False, "configured_reviewer_required_for_automerge")
+
+
+def test_an_approval_submitted_after_the_head_commits_is_still_approved_at_head():
+    # The forge's own example: the review at 07:30:30Z names a head committed a
+    # minute earlier, which is the only order in which it proves anything.
+    assert mg.review_verdict([review("APPROVED")], HEAD, "author", set(), make_policy(),
+                             HEAD_COMMITTED_AT) == ("success", "approved_at_head")
+
+
+def test_an_approval_submitted_34_minutes_before_the_head_commit_is_refused():
+    # review 5855285914 was submitted 34 minutes before the commit the forge
+    # later reassigned it to; `commit_id` matched the head but proves nothing.
+    late_head = "2026-11-11T08:04:39Z"
+    assert mg.review_verdict([review("APPROVED")], HEAD, "author", set(), make_policy(),
+                             late_head) == ("pending", "current_head_approval_required")
+    assert decide(head_committed_at=late_head) == (False, "current_head_approval_required")
+
+
+def test_an_approval_submitted_60_seconds_before_the_head_commit_is_accepted():
+    assert mg.review_verdict(
+        [review("APPROVED", submitted_at="2026-11-11T07:28:06Z")], HEAD, "author", set(),
+        make_policy(), HEAD_COMMITTED_AT) == ("success", "approved_at_head")
+
+
+def test_an_approval_without_a_usable_submitted_at_is_refused():
+    missing = review("APPROVED")
+    del missing["submitted_at"]
+    for item in (missing, review("APPROVED", submitted_at="not-a-timestamp")):
+        with pytest.raises(mg.Unusable, match="invalid_review_submitted_at"):
+            mg.review_verdict([item], HEAD, "author", set(), make_policy(), HEAD_COMMITTED_AT)
+
+
+def test_an_unparseable_head_commit_time_is_refused():
+    with pytest.raises(mg.Unusable, match="invalid_head_commit_time"):
+        mg.review_verdict([review("APPROVED")], HEAD, "author", set(), make_policy(),
+                          "the day before yesterday")
+
+
+def test_a_comparison_whose_last_commit_is_not_the_head_is_refused():
+    shifted = comparison(["README.md"])
+    shifted["commits"] = [{"sha": OLD, "commit": {"committer": {"date": HEAD_COMMITTED_AT}}}]
+    assert decide(comparison_data=shifted) == (False, "comparison_head_mismatch")
+
+
+def test_a_comparison_without_commits_is_refused():
+    stripped = comparison(["README.md"])
+    del stripped["commits"]
+    assert decide(comparison_data=stripped) == (False, "invalid_comparison_commits")
 
 
 def test_policy_requires_a_reviewer_id():

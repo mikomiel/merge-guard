@@ -46,3 +46,19 @@ Grant `statuses: write` only to the gate workflows. Native
 `reviewDecision` is not an input: it is a derived value that GitHub recalculates
 and that drops approvals on a new commit in ways the gate cannot verify from a
 snapshot. The status records what the gate saw, for the head it saw it on.
+
+## What an approval proves
+
+An approval counts only when the review could have seen the head. The gate
+compares the review's `submitted_at` with the head commit's own committer date,
+and refuses `approved_at_head` when the head committed more than 300 seconds
+after the review was submitted. A review cannot be evidence for a commit that
+did not exist when it was written.
+
+`commit_id` alone is not trusted. The forge can reassign it to a commit that did
+not exist at submission time, and `original_commit_id` is `null` in observed
+data, so there is no immutable field to fall back to. A review whose
+`submitted_at` is missing or unreadable, or a head without a usable committer
+date, is a refusal rather than a pass. When an approval is skipped this way, the
+pull request falls back to `current_head_approval_required` unless the
+unchanged-diff carry applies.
