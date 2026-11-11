@@ -9,6 +9,7 @@ HEAD = "a" * 40
 BASE = "b" * 40
 OLD = "c" * 40
 REVIEWER_ID = 42
+COMMITTED_AT = "2026-11-11T07:29:06Z"
 
 
 def policy():
@@ -20,8 +21,8 @@ def policy():
     })
 
 
-def review(state, commit, rid=1):
-    return {"id": rid, "state": state, "commit_id": commit,
+def review(state, commit, rid=1, submitted_at="2026-11-11T07:30:30Z"):
+    return {"id": rid, "state": state, "commit_id": commit, "submitted_at": submitted_at,
             "user": {"id": REVIEWER_ID, "login": "reviewer[bot]", "type": "Bot"}}
 
 
@@ -52,7 +53,7 @@ def test_an_unchanged_diff_carries():
     carried = runner.carried_heads(api, pr(), [review("APPROVED", OLD)], policy())
     assert carried == {OLD}
     state, reason = mg.review_verdict(
-        [review("APPROVED", OLD)], HEAD, "author", set(), policy(), carried)
+        [review("APPROVED", OLD)], HEAD, "author", set(), policy(), COMMITTED_AT, carried)
     assert state == "success"
     assert reason == "approved at cccccccccccc (carried, unchanged diff)"
 
@@ -84,13 +85,23 @@ def test_a_later_change_request_wins():
     reviews = [review("APPROVED", OLD, rid=1), review("CHANGES_REQUESTED", HEAD, rid=2)]
     api = Compare(comparison(file()), comparison(file()))
     assert runner.carried_heads(api, pr(), reviews, policy()) == set()
-    assert mg.review_verdict(reviews, HEAD, "author", set(), policy())[0] == "failure"
+    assert mg.review_verdict(reviews, HEAD, "author", set(), policy(), COMMITTED_AT)[0] == "failure"
 
 
 def test_the_plan_carries_the_description_to_the_status():
-    pr_data = dict(pr(), reviews=[review("APPROVED", OLD)], maintainers=[], carried_heads=[OLD])
+    pr_data = dict(pr(), reviews=[review("APPROVED", OLD)], maintainers=[], carried_heads=[OLD],
+                   head_committed_at=COMMITTED_AT)
     plan = mg.review_plan([pr_data], policy())
     assert plan[HEAD] == ("success", "approved at cccccccccccc (carried, unchanged diff)")
+
+
+def test_a_stale_approval_plans_a_refusal_in_review_mode():
+    # Review mode publishes what review_plan decides, so a head that postdates
+    # the approval must plan a refusal rather than `approved_at_head` (#15).
+    pr_data = dict(pr(), reviews=[review("APPROVED", HEAD)], maintainers=[],
+                   carried_heads=[], head_committed_at="2026-11-11T08:04:39Z")
+    assert mg.review_plan([pr_data], policy())[HEAD] == (
+        "pending", "current_head_approval_required")
 
 
 def test_a_truncated_file_list_does_not_carry():
@@ -118,13 +129,13 @@ def test_a_policy_that_binds_the_approval_to_its_head_carries_nothing():
     api = Compare(comparison(file()), comparison(file()))
     assert runner.carried_heads(api, pr(), [review("APPROVED", OLD)], strict_policy()) == set()
     state, reason = mg.review_verdict(
-        [review("APPROVED", OLD)], HEAD, "author", set(), strict_policy(), set())
+        [review("APPROVED", OLD)], HEAD, "author", set(), strict_policy(), COMMITTED_AT, set())
     assert (state, reason) == ("pending", "current_head_approval_required")
 
 
 def test_the_same_policy_accepts_an_approval_of_this_head():
     state, reason = mg.review_verdict(
-        [review("APPROVED", HEAD)], HEAD, "author", set(), strict_policy(), set())
+        [review("APPROVED", HEAD)], HEAD, "author", set(), strict_policy(), COMMITTED_AT, set())
     assert (state, reason) == ("success", "approved_at_head")
 
 

@@ -10,6 +10,7 @@ BASE = "b" * 40
 OTHER = "d" * 40
 MERGE = "e" * 40
 REVIEWER_ID = 42
+COMMITTED_AT = "2026-11-11T07:29:06Z"
 
 
 def policy():
@@ -23,6 +24,7 @@ def policy():
 
 def review(state="APPROVED", commit=HEAD):
     return {"id": 1, "state": state, "commit_id": commit,
+            "submitted_at": "2026-11-11T07:30:30Z",
             "user": {"id": REVIEWER_ID, "login": "reviewer[bot]", "type": "Bot"}}
 
 
@@ -69,7 +71,12 @@ class Fake:
 
     def compare(self, base, head):
         return {"status": "ahead", "base_commit": {"sha": base},
-                "merge_base_commit": {"sha": base}, "files": [{"filename": "README.md"}]}
+                "merge_base_commit": {"sha": base},
+                "commits": [{"sha": head, "commit": {"committer": {"date": COMMITTED_AT}}}],
+                "files": [{"filename": "README.md"}]}
+
+    def commit_time(self, sha):
+        return COMMITTED_AT
 
     def branch_head(self, branch):
         return BASE
@@ -178,6 +185,24 @@ def test_check_runs_requires_an_integer_total():
         api.check_runs(HEAD)
 
 
+def test_commit_time_reads_the_commit_it_asked_for():
+    api = runner.GitHub(policy())
+    api.request = lambda path, method="GET", body=None: {
+        "sha": HEAD, "commit": {"committer": {"date": COMMITTED_AT}}}
+    assert api.commit_time(HEAD) == COMMITTED_AT
+
+    # A response about another commit, or one with no committer date, is not a
+    # timestamp for this head.
+    api.request = lambda path, method="GET", body=None: {
+        "sha": OTHER, "commit": {"committer": {"date": COMMITTED_AT}}}
+    with pytest.raises(runner.ApiError):
+        api.commit_time(HEAD)
+
+    api.request = lambda path, method="GET", body=None: {"sha": HEAD, "commit": {}}
+    with pytest.raises(runner.ApiError):
+        api.commit_time(HEAD)
+
+
 def test_publish_dedups_only_an_unchanged_bot_status():
     api = runner.GitHub(policy(), apply=True)
     posts = []
@@ -251,6 +276,7 @@ class Carrying(Fake):
     def compare(self, base, head):
         return {"status": "ahead", "base_commit": {"sha": base},
                 "merge_base_commit": {"sha": base},
+                "commits": [{"sha": head, "commit": {"committer": {"date": COMMITTED_AT}}}],
                 "files": [{"filename": "README.md", "status": "modified",
                            "patch": "@@ -1 +1 @@\n-a\n+b"}]}
 
