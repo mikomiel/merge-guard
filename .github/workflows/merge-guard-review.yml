@@ -36,7 +36,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: mikomiel/merge-guard@602c31b4f889fd7bffe79986f5ad31493023b4ba  # v0.0.1
+      - uses: mikomiel/merge-guard@f4506bcf74cc4ea8e457f2857e1a7699b474f065  # post-v0.0.1: carries carry_unchanged_diff
         with:
           mode: review
           token: ${{ github.token }}
