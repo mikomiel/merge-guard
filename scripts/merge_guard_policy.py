@@ -45,6 +45,10 @@ class Policy:
     dependency_update_exemption: bool
     review_workflow: str
     merge_workflow: str
+    # Defaults on so an existing consumer keeps the behaviour it pinned. A
+    # repository that must bind the approval to the commit itself turns it off
+    # and then a new commit always needs a new approval.
+    carry_unchanged_diff: bool
 
 
 def load_policy(data: Any) -> Policy:
@@ -63,6 +67,7 @@ def load_policy(data: Any) -> Policy:
         exemption = bool(paths.get("dependency_update_exemption", False))
         review_workflow = review.get("review_workflow", "merge-guard-review.yml")
         merge_workflow = review.get("merge_workflow", "merge-guard-merge.yml")
+        carry = review.get("carry_unchanged_diff", True)
     except (KeyError, TypeError, AttributeError) as exc:
         raise Unusable(f"policy_missing_field: {exc}") from exc
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
@@ -80,9 +85,11 @@ def load_policy(data: Any) -> Policy:
         raise Unusable("policy_ordinary_paths_invalid")
     if not isinstance(data.get("paths", {}).get("dependency_update_exemption", False), bool):
         raise Unusable("policy_dependency_exemption_invalid")
+    if type(carry) is not bool:
+        raise Unusable("policy_carry_unchanged_diff_invalid")
     return Policy(repository, base_branch, reviewer_id, reviewer_login, reviewer_type,
                   tuple(checks), gate, tuple(ordinary), exemption,
-                  review_workflow, merge_workflow)
+                  review_workflow, merge_workflow, carry)
 
 
 def valid_sha(value: Any) -> bool:
