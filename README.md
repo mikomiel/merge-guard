@@ -48,6 +48,10 @@ its own pull requests; `.github/merge-guard.toml` is its policy.
 Read [docs/trusted-relay.md](docs/trusted-relay.md) before changing the
 triggers: the relay is what makes the writes trustworthy.
 
+A release is consumed as a pinned, generated copy rather than a dependency
+upgrade. [docs/pin-bump.md](docs/pin-bump.md) is the procedure: what a release
+guarantees, how to record the pin, how to bump it, and the states to avoid.
+
 ## Carried approvals
 
 Required branches-up-to-date stays on, so a base advance normally invalidates
