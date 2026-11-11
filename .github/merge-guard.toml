@@ -1,0 +1,31 @@
+# This repository's own policy for the gate it ships.
+#
+# This file is a sensitive path: changing it is a human decision, exactly like
+# the workflows that read it.
+
+[repository]
+name = "mikomiel/merge-guard"
+base_branch = "main"
+
+[review]
+# The reviewer identity the gate trusts. The numeric id is required: a login can
+# be renamed, an id cannot. Native reviewDecision is never an input.
+reviewer_id = 351676210
+reviewer_login = "ecomwizards-gandalf[bot]"
+reviewer_type = "Bot"
+required_checks = ["checks"]
+gate_context = "review"
+review_workflow = "merge-guard-review.yml"
+merge_workflow = "merge-guard-merge.yml"
+
+[paths]
+# An allowlist. Anything not matched is human-only: `scripts/`, `tests/`,
+# `.github/`, `action.yml` and `requirements-dev.txt` are all deliberately
+# outside it.
+ordinary = [
+  "README.md",
+  "CHANGELOG.md",
+  "docs/**",
+]
+# A dependency bump is a human decision here as well.
+dependency_update_exemption = false
