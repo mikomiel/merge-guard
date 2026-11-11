@@ -16,6 +16,10 @@ required_checks = ["CHECKS"]
 gate_context = "review"
 review_workflow = "merge-guard-review.yml"
 merge_workflow = "merge-guard-merge.yml"
+# Off binds every approval to the commit it was given for: an identical patch on
+# a new head inherits nothing. On by default, because a base advance otherwise
+# discards a review the gate already accepted.
+carry_unchanged_diff = true
 
 [paths]
 # An allowlist. Anything not matched is human-only.

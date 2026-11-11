@@ -238,7 +238,13 @@ def carried_heads(api: GitHub, pr: dict[str, Any], reviews: list[Any],
     Both sides are the same comparison shape: the current base against the head,
     and the current base against the older head. That is the pull request's own
     change in each case, including renames and conflict-resolution merges.
+
+    A policy that turns ``carry_unchanged_diff`` off gets no carry at all: an
+    unchanged patch is not an approval of the commit that carries it, and that
+    repository binds every approval to its own head.
     """
+    if not policy.carry_unchanged_diff:
+        return set()
     old = _carried_review(reviews, pr["head"]["sha"], policy)
     if old is None:
         return set()

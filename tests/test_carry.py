@@ -1,5 +1,7 @@
 """Approval carry-over: only when the pull request's own diff is unchanged."""
 
+import pytest
+
 from scripts import merge_guard as runner
 from scripts import merge_guard_policy as mg
 
@@ -96,3 +98,40 @@ def test_a_truncated_file_list_does_not_carry():
     api = Compare(comparison(*many), comparison(*many))
     pr_data = dict(pr(), changed_files=301)
     assert runner.carried_heads(api, pr_data, [review("APPROVED", OLD)], policy()) == set()
+
+
+def strict_policy():
+    return mg.load_policy({
+        "repository": {"name": "o/r", "base_branch": "main"},
+        "review": {"reviewer_id": REVIEWER_ID, "reviewer_login": "reviewer[bot]",
+                   "required_checks": ["checks"], "gate_context": "review",
+                   "carry_unchanged_diff": False},
+        "paths": {"ordinary": ["README.md"]},
+    })
+
+
+def test_the_policy_defaults_to_carrying():
+    assert policy().carry_unchanged_diff is True
+
+
+def test_a_policy_that_binds_the_approval_to_its_head_carries_nothing():
+    api = Compare(comparison(file()), comparison(file()))
+    assert runner.carried_heads(api, pr(), [review("APPROVED", OLD)], strict_policy()) == set()
+    state, reason = mg.review_verdict(
+        [review("APPROVED", OLD)], HEAD, "author", set(), strict_policy(), set())
+    assert (state, reason) == ("pending", "current_head_approval_required")
+
+
+def test_the_same_policy_accepts_an_approval_of_this_head():
+    state, reason = mg.review_verdict(
+        [review("APPROVED", HEAD)], HEAD, "author", set(), strict_policy(), set())
+    assert (state, reason) == ("success", "approved_at_head")
+
+
+def test_a_non_boolean_carry_setting_is_refused():
+    with pytest.raises(mg.Unusable, match="policy_carry_unchanged_diff_invalid"):
+        mg.load_policy({
+            "repository": {"name": "o/r", "base_branch": "main"},
+            "review": {"reviewer_id": REVIEWER_ID, "reviewer_login": "reviewer[bot]",
+                       "required_checks": ["checks"], "carry_unchanged_diff": "false"},
+        })

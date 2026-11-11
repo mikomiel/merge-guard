@@ -63,6 +63,12 @@ merge that changes the patch, or a file whose patch GitHub does not return
 (binary or too large) means no carry-over. The published status says
 `approved at <old head> (carried, unchanged diff)` so the reviewer is visible.
 
+Carry-over is a policy choice, not a fixed rule. `carry_unchanged_diff = false`
+in `[review]` turns it off, and then an approval binds to the commit it was given
+for: an identical patch on a new head inherits nothing and needs its own
+approval. It defaults to `true` so a consumer that already relies on it keeps the
+behaviour it pinned.
+
 ## Development
 
 The gate is Python, standard library where it can be, so a forge integration
