@@ -31,8 +31,11 @@ file, which release it came from. The copy is generated, never authored.
 
 ## What the pin guarantees
 
-The digest does not prove the release is correct; it proves the bytes you run are
-the bytes the release published. Provenance beyond that is the tag and the notes.
+Provided the manifest's digests were taken from the verified release commit,
+matching digests show that the vendored files are byte-for-byte the ones that
+release published. They do not establish correctness, and they do not
+authenticate provenance on their own: the tag and its notes are what make the
+baseline mean anything.
 
 ## Bumping
 
