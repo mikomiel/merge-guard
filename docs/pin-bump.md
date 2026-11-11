@@ -18,7 +18,8 @@ file, which release it came from. The copy is generated, never authored.
    name it.
 3. **Record the pin.** One manifest beside the copy, holding the product, the
    version, the source commit, and for each file its source path and its
-   SHA-256. Generate the digests with `sha256sum`; do not type them.
+   SHA-256. Generate the digests with `sha256sum`; do not type them, and commit
+   the manifest with the copy so the record and the bytes move together.
 4. **Enforce it in your own checks.** The check must compare the tree against the
    manifest in both directions: a file whose digest differs, a file the manifest
    names and the tree lacks, and a file the tree carries and the manifest does
@@ -50,5 +51,8 @@ A bump is the same procedure with a different tag. Nothing is edited in place:
 
 ## Rolling back
 
-Restore the previous implementation from your own history and delete the vendor
-tree. The earlier release remains available; a pin is not a migration.
+Restore the previous implementation from your own history, delete the vendor
+tree, and put the manifest and the check back with it: a check that still looks
+for files you have deleted reports them missing, and an entrypoint that still
+delegates has nothing left to delegate to. The earlier release remains
+available; a pin is not a migration.
