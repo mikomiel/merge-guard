@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a defect in merge-guard or in a gate decision it makes.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private repository names, host names or deployment details.
+        Use synthetic values and redact logs before posting.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What failed, and which decision or refusal was wrong.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: v0.0.2 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: The policy, the exact base and head pair, and the steps, with synthetic values.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Runner type, Python version and the merge-guard policy version.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Optional. Redact before posting.
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed credentials, private addresses and deployment details from this report.
+          required: true
