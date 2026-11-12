@@ -25,6 +25,12 @@
 | `review` | `merge-guard review` published an approval for this exact head. |
 | `dependency-review` | The change does not add a dependency with a known vulnerability. |
 
+These contexts are enforced twice: GitHub branch protection requires them on the
+pull request, and this repository's gate re-reads the subset in
+`.github/merge-guard.toml` (`checks` and `dependency-review`) before its own
+merge. Both must agree with this table; a missing or skipped check is a refusal,
+not a pass.
+
 ## What lands
 
 A pull request lands only after an independent review approves the exact head
