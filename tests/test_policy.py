@@ -263,6 +263,35 @@ def test_ordinary_is_an_allowlist_and_star_cannot_cross_a_slash():
     assert not mg.ordinary("scripts/engine.py", policy)
 
 
+def test_a_missing_required_check_blocks():
+    policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
+    assert decide(policy=policy) == (False, "required_check_not_success")
+
+
+def test_a_skipped_required_check_blocks():
+    policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
+    assert decide(policy=policy, runs=[run(), run("dependency-review", conclusion="skipped")]) == (
+        False, "required_check_not_success")
+
+
+def test_a_failed_required_check_blocks():
+    policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
+    assert decide(policy=policy, runs=[run(), run("dependency-review", conclusion="failure")]) == (
+        False, "required_check_not_success")
+
+
+def test_both_required_checks_green_is_eligible():
+    policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
+    assert decide(policy=policy, runs=[run(), run("dependency-review")]) == (True, "eligible")
+
+
+def test_the_repository_policy_requires_dependency_review():
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / ".github/merge-guard.toml").read_text())
+    policy = mg.load_policy(data)
+    assert policy.required_checks == ("checks", "dependency-review")
+
+
 def test_the_example_policy_loads():
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "examples/merge-guard.toml").read_text())
