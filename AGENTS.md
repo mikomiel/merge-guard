@@ -22,8 +22,10 @@ python -m pytest -q
 - A change is ready for a pull request when every command passes.
   `CONTRIBUTING.md` "Required checks" owns the contexts that `main` requires
   on the exact head.
-- This repository has no secret scanner in CI. Before a push, inspect the
-  complete diff and the commit messages for credentials.
+- `scripts/check_estate_identifiers.py` runs in CI. It matches selected
+  credential and private-identifier patterns in tracked files. It is not a
+  complete secret scanner and it does not read commit messages. Before a
+  push, inspect the complete diff and the commit messages for credentials.
 
 ## Project shape
 
@@ -45,7 +47,8 @@ python -m pytest -q
 ## Working contract
 
 - Branch from `main`. Use one branch, one author and one pull request for one
-  change. For a behaviour change, open an issue first.
+  change. For a behaviour change, open an issue first. A bug fix can go
+  straight to a pull request.
 - Do not push to `main`. Branch protection requires the checks and the
   `review` status on the exact head. A new commit needs fresh CI and a fresh
   review.
