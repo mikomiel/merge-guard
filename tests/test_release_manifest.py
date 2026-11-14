@@ -440,3 +440,47 @@ def test_an_overlong_path_in_the_manifest_is_refused(tmp_path):
     findings = release_manifest.check(root)
     assert any("x" * 256 in finding for finding in findings)
     assert any("y" * 256 in finding for finding in findings)
+
+
+# The command line is what the workflow calls, so its boundary is pinned here
+# rather than left to the functions it delegates to.
+
+def test_cli_defaults_to_check(monkeypatch, capsys):
+    monkeypatch.setattr(release_manifest, "check", lambda root: [])
+    assert release_manifest.main([]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_cli_check_prints_each_finding_and_exits_1(monkeypatch, capsys):
+    findings = ["digest mismatch: scripts/assurance.py", "missing: docs/x.md"]
+    monkeypatch.setattr(release_manifest, "check", lambda root: findings)
+    assert release_manifest.main(["check"]) == 1
+    err = capsys.readouterr().err
+    assert "digest mismatch: scripts/assurance.py" in err
+    assert "missing: docs/x.md" in err
+
+
+def test_cli_check_refuses_paths(capsys):
+    assert release_manifest.main(["check", "scripts/assurance.py"]) == 2
+    assert "check takes no paths" in capsys.readouterr().err
+
+
+def test_cli_refuses_an_unknown_action(capsys):
+    assert release_manifest.main(["frobnicate"]) == 2
+    assert "unknown action: frobnicate" in capsys.readouterr().err
+
+
+def test_cli_write_passes_paths_and_exits_1_on_findings(monkeypatch, capsys):
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        release_manifest, "write",
+        lambda root, paths: seen.append(list(paths)) or ["not tracked in HEAD: x"])
+    assert release_manifest.main(["write", "a.py", "b.py"]) == 1
+    assert seen == [["a.py", "b.py"]]
+    assert "not tracked in HEAD: x" in capsys.readouterr().err
+
+
+def test_cli_write_without_findings_exits_0(monkeypatch, capsys):
+    monkeypatch.setattr(release_manifest, "write", lambda root, paths: [])
+    assert release_manifest.main(["write"]) == 0
+    assert capsys.readouterr().err == ""

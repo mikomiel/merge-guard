@@ -40,6 +40,30 @@ file, which release it came from. The copy is generated, never authored.
 6. **Then remove the superseded implementation** and leave the retained
    entrypoint that delegates to the pinned copy.
 
+## Regenerating the manifest
+
+The manifest is generated, so the order matters. Commit the source or
+declaration change first, with the old manifest still in place; then run the
+generator at the repository root and read what it prints:
+
+```
+python3 scripts/release_manifest.py write
+```
+
+With no arguments it regenerates every declared path. With paths it replaces
+the closure with exactly those files, so a path has to be chosen, not inferred.
+The generator reads the committed blobs, not the working tree, and it refuses a
+declaration it cannot explain instead of dropping it. Commit the regenerated
+`release-manifest.json` on its own, so the closure change is the diff a reviewer
+reads, and run the same check the workflow runs:
+
+```
+python3 scripts/release_manifest.py check
+```
+
+Do not edit a digest or a size by hand: the check compares the manifest with the
+committed blobs, and a hand edit fails it with the file named.
+
 ## What the pin guarantees
 
 Provided the manifest's digests were taken from the verified release commit,
