@@ -9,6 +9,7 @@
 
    ```bash
    python3 scripts/check_estate_identifiers.py
+   python3 scripts/release_manifest.py check
    ruff check .
    python -m pytest -q
    ```
@@ -21,7 +22,7 @@
 
 | Context | What it proves |
 | --- | --- |
-| `checks` | The public-content scan passed, and the lint and test suite passed. |
+| `checks` | The public-content scan passed, the release manifest matches the tree, and the lint and test suite passed. |
 | `review` | `merge-guard review` published an approval for this exact head. |
 | `dependency-review` | The change does not add a dependency with a known vulnerability. |
 
@@ -46,9 +47,10 @@ approval from before the latest commit does not count.
 
 An allowlist in that file decides which paths may land this way. `README.md`,
 `CHANGELOG.md` and `docs/**` are ordinary; `scripts/`, `tests/`, `.github/`,
-`action.yml` and `requirements-dev.txt` are outside it, so a change to the gate's
-own code or to its workflow is merged by a person after the review. The author of
-a pull request never merges it here.
+`action.yml`, `requirements-dev.txt` and `release-manifest.json` are outside it,
+so a change to the gate's own code or workflow, or to the published closure, is
+merged by a person after the review. The author of a pull request never merges it
+here.
 
 ## Response expectations
 

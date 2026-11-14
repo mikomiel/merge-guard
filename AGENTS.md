@@ -12,6 +12,7 @@ Non-goals: a package, a container image, a service.
 ```sh
 python -m pip install -r requirements-dev.txt
 python3 scripts/check_estate_identifiers.py
+python3 scripts/release_manifest.py check
 ruff check .
 python -m pytest -q
 ```
@@ -59,6 +60,10 @@ python -m pytest -q
   `CHANGELOG.md` and `docs/**`. A person merges every other path, including
   `scripts/`, `tests/`, `.github/`, `action.yml`, `requirements-dev.txt` and
   these instructions. Do not widen the allowlist to unblock a pull request.
+- `release-manifest.json` owns the release closure: the files a consumer copies,
+  their SHA-256 and their size. `checks` fails when a declared file differs from
+  it. Extending the closure is a release decision, so the file stays outside the
+  ordinary allowlist.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary
@@ -77,6 +82,8 @@ python -m pytest -q
 - For the review and merge rules of this repository, read `CONTRIBUTING.md`.
 - For the relay design and its trust argument, read `docs/trusted-relay.md`.
 - For how a consumer pins and bumps a release, read `docs/pin-bump.md`.
+- For what a release publishes, read `release-manifest.json`;
+  `scripts/release_manifest.py` is its check and its generator.
 - For a pull request that does not merge, read `docs/troubleshooting.md`.
 - For the scope of a vulnerability report, read `SECURITY.md`.
 

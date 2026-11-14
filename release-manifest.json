@@ -1,0 +1,13 @@
+{
+  "schema": "release-manifest.v1",
+  "product": "mikomiel/merge-guard",
+  "entrypoints": [
+    "scripts/assurance.py"
+  ],
+  "files": {
+    "scripts/assurance.py": {
+      "sha256": "673e1c0b9f17df94400eabcd72fb18a0cba9bf481bc8a4ca0ce9fe017c096f7d",
+      "bytes": 21379
+    }
+  }
+}
