@@ -76,15 +76,18 @@ def _closure_problem(root: Path, relative: str) -> str | None:
     if relative == MANIFEST_NAME:
         return "the manifest never lists itself"
     current = root
-    for part in candidate.parts[:-1]:
-        current = current / part
-        if current.is_symlink():
-            return "path traverses a symlink; a closure names regular files"
-    target = current / candidate.parts[-1]
-    if target.is_symlink():
-        return "path is a symlink; a closure names regular files"
-    if not target.is_file():
-        return "path is missing or not a regular file"
+    try:
+        for part in candidate.parts[:-1]:
+            current = current / part
+            if current.is_symlink():
+                return "path traverses a symlink; a closure names regular files"
+        target = current / candidate.parts[-1]
+        if target.is_symlink():
+            return "path is a symlink; a closure names regular files"
+        if not target.is_file():
+            return "path is missing or not a regular file"
+    except OSError as exc:
+        return f"path cannot be inspected: {exc.strerror or exc}"
     return None
 
 

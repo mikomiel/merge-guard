@@ -421,3 +421,22 @@ def test_a_dot_path_is_refused(tmp_path):
     _rewrite(root, manifest)
     findings = release_manifest.check(root)
     assert any("path is '.'" in finding for finding in findings)
+
+
+def test_an_overlong_path_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    before = (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8")
+    findings = release_manifest.write(root, ["x" * 256])
+    assert any("x" * 256 in finding for finding in findings)
+    assert (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8") == before
+
+
+def test_an_overlong_path_in_the_manifest_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    manifest = _manifest(root)
+    manifest["files"]["x" * 256] = {"sha256": "0" * 64, "bytes": 1}
+    manifest["files"]["y" * 256 + "/file.py"] = {"sha256": "0" * 64, "bytes": 1}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("x" * 256 in finding for finding in findings)
+    assert any("y" * 256 in finding for finding in findings)
