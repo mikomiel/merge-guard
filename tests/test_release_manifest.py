@@ -412,3 +412,12 @@ def test_a_failed_replace_leaves_the_manifest_unchanged(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         release_manifest.write(root)
     assert manifest_path.read_bytes() == before
+
+
+def test_a_dot_path_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    manifest = _manifest(root)
+    manifest["files"]["."] = {"sha256": "0" * 64, "bytes": 1}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("path is '.'" in finding for finding in findings)

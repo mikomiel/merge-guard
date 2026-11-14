@@ -63,6 +63,8 @@ def _closure_problem(root: Path, relative: str) -> str | None:
     if not relative or relative != relative.strip():
         return "path is empty or padded with whitespace"
     candidate = PurePosixPath(relative)
+    if not candidate.parts:
+        return "path is '.' or empty; a closure names a file"
     if "\\" in relative:
         return "path uses a backslash separator"
     if candidate.is_absolute():
