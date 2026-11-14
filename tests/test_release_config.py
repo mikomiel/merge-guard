@@ -81,4 +81,26 @@ def test_the_workflow_observes_the_merges_that_suppress_push_events():
     triggers = _triggers(_workflow())
     assert triggers["push"] == {"branches": ["main"]}
     assert triggers["workflow_run"]["workflows"] == ["merge-guard merge"]
+    assert triggers["workflow_run"]["types"] == ["completed"]
     assert "workflow_dispatch" in triggers
+
+
+def test_the_workflow_pins_the_release_please_action_and_the_default_branch_guard():
+    workflow = _workflow()
+    job = workflow["jobs"]["release-please"]
+    (step,) = job["steps"]
+    assert step["uses"].startswith("googleapis/release-please-action@")
+    guard = job["if"]
+    assert "github.event_name != 'workflow_run'" in guard
+    assert "head_branch == 'main'" in guard
+
+
+def test_the_python_updater_targets_exist_in_the_shape_it_rewrites():
+    # release-please's python strategy rewrites a literal [project].version and
+    # a literal ``__version__ = "x.y.z"`` in <name>/__init__.py. A computed value
+    # or a moved attribute would silently stop being updated.
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["name"] == "merge-guard"
+    assert SEMVER.fullmatch(project["project"]["version"])
+    init_text = (ROOT / "merge_guard" / "__init__.py").read_text(encoding="utf-8")
+    assert re.search(r'^__version__ = "\d+\.\d+\.\d+"$', init_text, re.MULTILINE)
