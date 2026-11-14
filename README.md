@@ -50,8 +50,10 @@ Read [docs/trusted-relay.md](docs/trusted-relay.md) before changing the
 triggers: the relay is what makes the writes trustworthy.
 
 A release is consumed as a pinned, generated copy rather than a dependency
-upgrade. [docs/pin-bump.md](docs/pin-bump.md) is the procedure: what a release
-guarantees, how to record the pin, how to bump it, and the states to avoid.
+upgrade. [release-manifest.json](release-manifest.json) at the tag names the
+closure and each file's SHA-256; [docs/pin-bump.md](docs/pin-bump.md) is the
+procedure: what a release guarantees, how to record the pin, how to bump it, and
+the states to avoid.
 
 The action inputs, the command line, the JSON output, the exit codes and the
 policy schema are one contract: [docs/cli.md](docs/cli.md). It is the file to
