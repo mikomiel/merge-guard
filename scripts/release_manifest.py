@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -306,8 +307,13 @@ def check(root: Path) -> list[str]:
 
 
 def write(root: Path, paths: list[str] | None = None) -> list[str]:
-    """Regenerate the manifest; *paths* replaces the closure when given."""
-    manifest, _raw, findings = _load(root)
+    """Regenerate the manifest; *paths* replaces the closure when given.
+
+    The declarations come from the committed manifest, so a declaration change
+    is committed before the digests are regenerated; *paths* is the explicit way
+    to change the closure itself.
+    """
+    manifest, raw, findings = _load(root)
     if manifest is None:
         return findings
     findings += _validate_structure(manifest)
@@ -319,6 +325,9 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     entries, tree_problem = _tree_entries(root)
     if entries is None:
         return [_finding(MANIFEST_NAME, tree_problem or "no tree")]
+    self_problem = _manifest_self_problem(root, entries, raw)
+    if self_problem is not None:
+        return [_finding(MANIFEST_NAME, self_problem)]
 
     replaced: dict[str, dict[str, Any]] = {}
     for relative in closure:
@@ -352,10 +361,19 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
 
     updated = dict(manifest)
     updated["files"] = replaced
-    (root / MANIFEST_NAME).write_text(
-        json.dumps(updated, indent=2, sort_keys=False) + "\n", encoding="utf-8"
-    )
-    return _declaration_findings(updated, root, entries)
+    problems = _declaration_findings(updated, root, entries)
+    if problems:
+        return problems
+    temporary = root / f".{MANIFEST_NAME}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(updated, indent=2, sort_keys=False) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, root / MANIFEST_NAME)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return []
 
 
 def main(argv: list[str]) -> int:

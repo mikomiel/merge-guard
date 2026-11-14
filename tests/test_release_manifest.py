@@ -363,3 +363,15 @@ def test_a_transformed_manifest_checkout_is_refused(tmp_path):
     assert b"\r\n" in path.read_bytes()
     findings = release_manifest.check(root)
     assert any("differs from HEAD" in finding for finding in findings)
+
+
+def test_a_refused_write_requires_a_committed_manifest(tmp_path):
+    root = _repo(tmp_path)
+    path = root / release_manifest.MANIFEST_NAME
+    manifest = _manifest(root)
+    manifest["entrypoints"] = []
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+    findings = release_manifest.write(root, ["scripts/assurance.py"])
+    assert any("differs from HEAD" in finding for finding in findings)
+    assert path.read_text(encoding="utf-8") == before
