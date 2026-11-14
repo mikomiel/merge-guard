@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import merge_guard_policy as mg
+from merge_guard import policy as mg
 
 HEAD = "a" * 40
 BASE = "b" * 40
