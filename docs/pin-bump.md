@@ -1,10 +1,12 @@
 # Pinning a release
 
-A release in this repository is an annotated tag on `main`. The tag names the
-commit; [`release-manifest.json`](../release-manifest.json) at that commit names
-the closure: the files a consumer copies, and nothing else, each with a SHA-256
-and a size. `scripts/release_manifest.py check` proves it describes the tree it
-sits in, on every pull request and every push to `main`.
+A release in this repository is a tag on `main`. `v0.0.1` and `v0.0.2` are
+annotated tags written by hand; from the first Release Please version onward the
+tag is lightweight and is created when the release pull request merges. The tag
+names the commit; [`release-manifest.json`](../release-manifest.json) at that
+commit names the closure: the files a consumer copies, and nothing else, each
+with a SHA-256 and a size. `scripts/release_manifest.py check` proves it
+describes the tree it sits in, on every pull request and every push to `main`.
 
 The manifest is the closure's only owner. `v0.0.1` and `v0.0.2` predate it, so
 their closure is whatever their release notes state: `v0.0.1` is one file,

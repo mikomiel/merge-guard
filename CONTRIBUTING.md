@@ -47,10 +47,37 @@ approval from before the latest commit does not count.
 
 An allowlist in that file decides which paths may land this way. `README.md`,
 `CHANGELOG.md` and `docs/**` are ordinary; `scripts/`, `tests/`, `.github/`,
-`action.yml`, `requirements-dev.txt` and `release-manifest.json` are outside it,
-so a change to the gate's own code or workflow, or to the published closure, is
-merged by a person after the review. The author of a pull request never merges it
-here.
+`action.yml`, `requirements-dev.txt`, `pyproject.toml`, `merge_guard/` and
+`release-manifest.json` are outside it, so a change to the gate's own code or
+workflow, or to the published closure, is merged by a person after the review.
+The author of a pull request never merges it here.
+
+## Releases
+
+Releases use [release-please](https://github.com/googleapis/release-please) so
+the version, the changelog and the tag cannot disagree. A merged
+release-relevant conventional commit (`feat`, `fix` or `perf`) on `main` makes
+release-please open or update one release pull request: it bumps
+`pyproject.toml` and `merge_guard/__init__.py`, writes `CHANGELOG.md` and
+records the version in `.release-please-manifest.json`. That update is observed
+after both a maintainer merge and a merge by the repository's own automation.
+
+Merging the release pull request is the release decision; release-please then
+creates the tag and the GitHub Release. It creates a lightweight tag: never tag
+by hand and never move a published tag. A `docs`, `chore` or `test` commit does
+not by itself open a release pull request.
+
+The workflow authenticates with a fine-grained personal access token stored as
+`RELEASE_PLEASE_TOKEN`, with Contents and pull-request write on this repository.
+The default `GITHUB_TOKEN` cannot be used: a pull request it creates does not
+trigger the pull-request workflows, so the required checks would never run, and a
+merge it makes suppresses the `push`-triggered run, which is why the workflow
+also observes the completed `merge-guard merge` run.
+
+The release pull request always changes a path outside the ordinary allowlist, so
+the gate never merges it: a maintainer merges it. The release notes do not state
+the closure; `release-manifest.json` owns it (`docs/pin-bump.md`). A tag or a
+release is not a deployment.
 
 ## Response expectations
 

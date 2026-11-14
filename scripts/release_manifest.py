@@ -1,6 +1,6 @@
 """The release closure: which files a consumer copies, and their exact bytes.
 
-A release here is an annotated tag on ``main``, but a tag names a commit, not a
+A release here is a tag on ``main``, but a tag names a commit, not a
 closure. Before this manifest existed the closure was prose in the release
 notes. Prose cannot be checked and it was not always written: ``v0.0.2`` states
 no closure at all, and ``v0.0.1``'s tag annotation and release body name

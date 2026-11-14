@@ -1,0 +1,16 @@
+# Project metadata only. merge-guard is consumed as a composite action pinned by
+# commit SHA and as a copied closure, never as a wheel, so there is deliberately
+# no build-system table. Release Please's python release type reads
+# [project].version and updates it together with merge_guard/__init__.py in one
+# release pull request.
+[project]
+name = "merge-guard"
+version = "0.0.2"
+description = "A pre-merge gate: an approval and a CI result must belong to the exact commit being merged."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+
+[project.urls]
+Homepage = "https://github.com/mikomiel/merge-guard"

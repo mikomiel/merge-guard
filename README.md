@@ -53,7 +53,9 @@ A release is consumed as a pinned, generated copy rather than a dependency
 upgrade. [release-manifest.json](release-manifest.json) at the tag names the
 closure and each file's SHA-256; [docs/pin-bump.md](docs/pin-bump.md) is the
 procedure: what a release guarantees, how to record the pin, how to bump it, and
-the states to avoid.
+the states to avoid. Release Please opens one release pull request for the
+release-relevant commits on `main`; merging it bumps the version, writes the
+changelog and creates the tag.
 
 The action inputs, the command line, the JSON output, the exit codes and the
 policy schema are one contract: [docs/cli.md](docs/cli.md). It is the file to
