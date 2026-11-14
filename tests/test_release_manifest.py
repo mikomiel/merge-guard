@@ -9,6 +9,7 @@ what a consumer imports.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -81,6 +82,7 @@ def test_the_repository_manifest_matches_the_tree():
 def test_a_mutated_file_is_named_with_its_digest(tmp_path):
     root = _repo(tmp_path)
     (root / "scripts" / "assurance.py").write_text("print('changed')\n", encoding="utf-8")
+    _commit(root)
     findings = release_manifest.check(root)
     assert any(
         "scripts/assurance.py" in finding and "sha256 differs" in finding
@@ -156,6 +158,7 @@ def test_malformed_json_is_refused(tmp_path):
 def test_write_refreshes_digests(tmp_path):
     root = _repo(tmp_path)
     (root / "scripts" / "assurance.py").write_text("print('new')\n", encoding="utf-8")
+    _commit(root)
     assert release_manifest.write(root) == []
     assert release_manifest.check(root) == []
     digest, size = release_manifest.digest(root / "scripts" / "assurance.py")
@@ -275,4 +278,60 @@ def test_a_refused_write_leaves_untracked_bytes_out(tmp_path):
     before = (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8")
     findings = release_manifest.write(root, ["scripts/assurance.py", "scripts/local.py"])
     assert any("not tracked in HEAD" in finding for finding in findings)
+    assert (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8") == before
+
+
+def test_digests_are_the_committed_bytes_not_the_checkout(tmp_path):
+    root = _repo(tmp_path)
+    (root / ".gitattributes").write_text(
+        "scripts/assurance.py text eol=crlf\n", encoding="utf-8"
+    )
+    _commit(root)
+    target = root / "scripts" / "assurance.py"
+    target.unlink()
+    subprocess.run(
+        ["git", "-C", str(root), "checkout", "--", "scripts/assurance.py"],
+        check=True,
+        capture_output=True,
+    )
+    worktree = target.read_bytes()
+    assert b"\r\n" in worktree
+
+    assert release_manifest.check(root) == []
+    assert release_manifest.write(root) == []
+    blob = subprocess.run(
+        ["git", "-C", str(root), "show", "HEAD:scripts/assurance.py"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    recorded = _manifest(root)["files"]["scripts/assurance.py"]
+    assert recorded == {"sha256": hashlib.sha256(blob).hexdigest(), "bytes": len(blob)}
+    assert recorded["sha256"] != hashlib.sha256(worktree).hexdigest()
+
+
+def test_a_committed_symlink_is_refused_even_when_the_checkout_is_regular(tmp_path):
+    root = _repo(tmp_path)
+    link = root / "link.py"
+    link.symlink_to("scripts/assurance.py")
+    _commit(root)
+    link.unlink()
+    link.write_text("print('regular now')\n", encoding="utf-8")
+    digest, size = release_manifest.digest(link)
+    manifest = _manifest(root)
+    manifest["files"]["link.py"] = {"sha256": digest, "bytes": size}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("mode 120000" in finding for finding in findings)
+
+
+def test_a_refused_write_keeps_a_committed_symlink_out(tmp_path):
+    root = _repo(tmp_path)
+    link = root / "link.py"
+    link.symlink_to("scripts/assurance.py")
+    _commit(root)
+    link.unlink()
+    link.write_text("print('regular now')\n", encoding="utf-8")
+    before = (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8")
+    findings = release_manifest.write(root, ["scripts/assurance.py", "link.py"])
+    assert any("mode 120000" in finding for finding in findings)
     assert (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8") == before

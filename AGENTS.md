@@ -61,9 +61,10 @@ python -m pytest -q
   `scripts/`, `tests/`, `.github/`, `action.yml`, `requirements-dev.txt` and
   these instructions. Do not widen the allowlist to unblock a pull request.
 - `release-manifest.json` owns the release closure: the files a consumer copies,
-  their SHA-256 and their size. `checks` fails when a declared file differs from
-  it, or is not a regular blob in the checked-out commit. Extending the closure
-  is a release decision, so the file stays outside the ordinary allowlist.
+  their SHA-256 and their size, taken from the checked-out commit's blobs.
+  `checks` fails when a declared file differs from it, or is not a regular blob
+  in that commit. Extending the closure is a release decision, so the file stays
+  outside the ordinary allowlist.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary

@@ -9,15 +9,18 @@ because this repository does not move a tag.
 
 ``release-manifest.json`` at the repository root is therefore the closure's only
 owner: the product, the entrypoints a consumer imports, and for every closure
-file its SHA-256 and size. It deliberately does not name a version -- the tag
+file its SHA-256 and size. Every digest is taken from the blob in the
+checked-out commit, never from the working tree: a checkout can rewrite line
+endings, and a consumer reproduces bytes from the tag. It deliberately does not name a version -- the tag
 names the commit, and the manifest at that commit is that tag's closure. Keeping
 the version out is what lets a release pull request that only bumps the version
 leave this file untouched, and it removes the circularity of a file that would
 otherwise have to record the digest of the commit containing it.
 
 ``check`` is what CI runs on every pull request, so the manifest is true at every
-commit a tag can point at. ``write`` regenerates the digests; the closure set
-itself is a release decision and stays a deliberate edit of this manifest.
+commit a tag can point at. ``write`` regenerates the digests from the same
+commit, so commit a closure change before regenerating the manifest; the closure
+set itself is a release decision and stays a deliberate edit of this manifest.
 """
 
 from __future__ import annotations
@@ -53,32 +56,32 @@ def _finding(relative: str, message: str) -> str:
     return f"{relative}: {message}"
 
 
-def _closure_path(root: Path, relative: str) -> tuple[Path | None, str | None]:
-    """Resolve one closure path inside *root*, refusing anything that escapes it."""
+def _closure_problem(root: Path, relative: str) -> str | None:
+    """Refuse a closure path that escapes *root* or is not a plain file on disk."""
     if not relative or relative != relative.strip():
-        return None, "path is empty or padded with whitespace"
+        return "path is empty or padded with whitespace"
     candidate = PurePosixPath(relative)
     if "\\" in relative:
-        return None, "path uses a backslash separator"
+        return "path uses a backslash separator"
     if candidate.is_absolute():
-        return None, "path is absolute"
+        return "path is absolute"
     if ".." in candidate.parts:
-        return None, "path contains '..'"
+        return "path contains '..'"
     if str(candidate) != relative:
-        return None, "path is not in normalised repository-relative form"
+        return "path is not in normalised repository-relative form"
     if relative == MANIFEST_NAME:
-        return None, "the manifest never lists itself"
+        return "the manifest never lists itself"
     current = root
     for part in candidate.parts[:-1]:
         current = current / part
         if current.is_symlink():
-            return None, "path traverses a symlink; a closure names regular files"
+            return "path traverses a symlink; a closure names regular files"
     target = current / candidate.parts[-1]
     if target.is_symlink():
-        return None, "path is a symlink; a closure names regular files"
+        return "path is a symlink; a closure names regular files"
     if not target.is_file():
-        return None, "path is missing or not a regular file"
-    return target, None
+        return "path is missing or not a regular file"
+    return None
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -91,8 +94,8 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return seen
 
 
-def _tree_modes(root: Path) -> tuple[dict[str, str] | None, str | None]:
-    """Map every path in the checked-out commit to its Git file mode.
+def _tree_entries(root: Path) -> tuple[dict[str, tuple[str, str]] | None, str | None]:
+    """Map every path in the checked-out commit to its Git mode and blob id.
 
     A closure names files a consumer extracts from the tag, so presence in the
     checkout is not enough: repository metadata, an untracked file and a
@@ -109,7 +112,7 @@ def _tree_modes(root: Path) -> tuple[dict[str, str] | None, str | None]:
     if completed.returncode != 0:
         message = completed.stderr.decode("utf-8", "replace").strip()
         return None, f"not a git checkout with a readable HEAD: {message}"
-    modes: dict[str, str] = {}
+    entries: dict[str, tuple[str, str]] = {}
     for record in completed.stdout.split(b"\0"):
         if not record:
             continue
@@ -117,17 +120,42 @@ def _tree_modes(root: Path) -> tuple[dict[str, str] | None, str | None]:
         parts = meta.split(b" ")
         if len(parts) != 3:
             return None, "git ls-tree output is not understood"
-        modes[path.decode("utf-8", "surrogateescape")] = parts[0].decode("ascii")
-    return modes, None
+        entries[path.decode("utf-8", "surrogateescape")] = (
+            parts[0].decode("ascii"),
+            parts[2].decode("ascii"),
+        )
+    return entries, None
 
 
-def _tree_finding(modes: dict[str, str], relative: str) -> str | None:
-    mode = modes.get(relative)
-    if mode is None:
+def _tree_finding(entries: dict[str, tuple[str, str]], relative: str) -> str | None:
+    entry = entries.get(relative)
+    if entry is None:
         return "path is not tracked in HEAD"
+    mode, _oid = entry
     if mode not in {"100644", "100755"}:
         return f"path is not a regular file in HEAD (mode {mode})"
     return None
+
+
+def _blob_digest(root: Path, oid: str) -> tuple[tuple[str, int] | None, str | None]:
+    """Digest the committed blob, never the possibly converted checkout bytes.
+
+    A checkout can differ from the commit by design -- ``.gitattributes`` with
+    ``eol=crlf`` rewrites the working tree -- so hashing the file would publish
+    digests a consumer cannot reproduce from the tag.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "blob", oid],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        return None, f"git is unavailable: {exc}"
+    if completed.returncode != 0:
+        message = completed.stderr.decode("utf-8", "replace").strip()
+        return None, f"cannot read the committed blob: {message}"
+    return (hashlib.sha256(completed.stdout).hexdigest(), len(completed.stdout)), None
 
 
 def _load(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
@@ -184,8 +212,8 @@ def check(root: Path) -> list[str]:
     if not isinstance(files, dict) or not isinstance(entrypoints, list):
         return findings
 
-    modes, tree_problem = _tree_modes(root)
-    if modes is None:
+    entries, tree_problem = _tree_entries(root)
+    if entries is None:
         findings.append(_finding(MANIFEST_NAME, tree_problem or "no tree"))
         return findings
 
@@ -205,16 +233,20 @@ def check(root: Path) -> list[str]:
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             findings.append(_finding(relative, "'bytes' is not a non-negative integer"))
             continue
-        target, problem = _closure_path(root, relative)
+        problem = _closure_problem(root, relative)
         if problem is not None:
             findings.append(_finding(relative, problem))
             continue
-        tree_finding = _tree_finding(modes, relative)
+        tree_finding = _tree_finding(entries, relative)
         if tree_finding is not None:
             findings.append(_finding(relative, tree_finding))
             continue
-        assert target is not None
-        actual, actual_size = digest(target)
+        _mode, oid = entries[relative]
+        blob, blob_problem = _blob_digest(root, oid)
+        if blob is None:
+            findings.append(_finding(relative, blob_problem or "blob is unreadable"))
+            continue
+        actual, actual_size = blob
         if actual_size != size:
             findings.append(
                 _finding(relative, f"size differs: manifest {size}, tree {actual_size}")
@@ -244,22 +276,26 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     entrypoints = manifest["entrypoints"]
     closure = sorted(paths) if paths else sorted(files)
 
-    modes, tree_problem = _tree_modes(root)
-    if modes is None:
+    entries, tree_problem = _tree_entries(root)
+    if entries is None:
         return [_finding(MANIFEST_NAME, tree_problem or "no tree")]
 
     replaced: dict[str, dict[str, Any]] = {}
     for relative in closure:
-        target, problem = _closure_path(root, relative)
+        problem = _closure_problem(root, relative)
         if problem is not None:
             findings.append(_finding(relative, problem))
             continue
-        tree_finding = _tree_finding(modes, relative)
+        tree_finding = _tree_finding(entries, relative)
         if tree_finding is not None:
             findings.append(_finding(relative, tree_finding))
             continue
-        assert target is not None
-        actual, size = digest(target)
+        _mode, oid = entries[relative]
+        blob, blob_problem = _blob_digest(root, oid)
+        if blob is None:
+            findings.append(_finding(relative, blob_problem or "blob is unreadable"))
+            continue
+        actual, size = blob
         replaced[relative] = {"sha256": actual, "bytes": size}
     if findings:
         return findings
