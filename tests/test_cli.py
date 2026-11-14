@@ -125,3 +125,49 @@ def test_the_action_entry_point_still_runs():
         capture_output=True, text=True, cwd=root, check=False)
     assert done.returncode == 0, done.stderr
     assert done.stdout.startswith("merge-guard ")
+
+
+def test_an_unreadable_policy_encoding_is_refused(tmp_path, capsys):
+    path = tmp_path / "policy.toml"
+    path.write_bytes(b'[repository]\nname = "b\xffd"\n')
+    code = cli.main(["status", "--policy", str(path)])
+    assert code == cli.EXIT_UNUSABLE
+    assert "policy_not_utf8" in capsys.readouterr().err
+
+
+def test_a_negative_review_verdict_still_exits_zero(monkeypatch, policy_file, capsys):
+    head = "a" * 40
+    monkeypatch.setattr(cli, "GitHub", Recorded().factory)
+    monkeypatch.setattr(
+        cli, "run_review",
+        lambda api, policy, apply, event_head: {"heads": {head: ["pending", "current_head_approval_required"]}})
+    assert cli.main(["status", "--policy", str(policy_file)]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == {
+        "mode": "status", "apply": False,
+        "result": {"heads": {head: ["pending", "current_head_approval_required"]}}}
+
+
+def test_the_merge_envelope_lists_decisions(monkeypatch, policy_file, capsys):
+    decision = {"number": 7, "head": "b" * 40, "eligible": False,
+                "merged": False, "reason": "shared_head"}
+    monkeypatch.setattr(cli, "GitHub", Recorded().factory)
+    monkeypatch.setattr(cli, "run_merge", lambda api, policy, apply: [decision])
+    assert cli.main(["merge", "--policy", str(policy_file)]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == {
+        "mode": "merge", "apply": False, "result": [decision]}
+
+
+def test_the_action_combinations_reach_the_trusted_context_check(monkeypatch, policy_file, capsys):
+    # The action always passes --apply. review and merge must therefore be
+    # accepted by the parser and refused by the trust check, not by argparse.
+    for name in ("GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_REF_PROTECTED",
+                 "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"):
+        monkeypatch.delenv(name, raising=False)
+    for mode in ("review", "merge"):
+        code = cli.main([mode, "--apply", "--policy", str(policy_file)])
+        assert code == cli.EXIT_UNUSABLE
+        assert "write_refused_outside_trusted_workflow" in capsys.readouterr().err
+    # status is CLI-only, and the documented refusal is what the action gets.
+    code = cli.main(["status", "--apply", "--policy", str(policy_file)])
+    assert code == cli.EXIT_UNUSABLE
+    assert "status_is_read_only" in capsys.readouterr().err

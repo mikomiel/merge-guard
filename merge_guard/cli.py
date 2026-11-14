@@ -54,6 +54,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_UNUSABLE
     try:
         policy = read_policy(args.policy)
+    except UnicodeDecodeError:
+        print("merge_guard_refused: policy_not_utf8", file=sys.stderr)
+        return EXIT_UNUSABLE
     except (OSError, tomllib.TOMLDecodeError, mg.Unusable) as exc:
         print(f"merge_guard_refused: {exc}", file=sys.stderr)
         return EXIT_UNUSABLE

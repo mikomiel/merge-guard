@@ -24,12 +24,25 @@ def test_action_inputs_are_pinned():
     assert "${{ inputs.policy }}" in run
 
 
-def test_the_policy_schema_is_the_documented_set():
+FROZEN_SCHEMA = {
+    "repository": {"name", "base_branch"},
+    "review": {
+        "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
+        "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",
+    },
+    "paths": {"ordinary", "dependency_update_exemption"},
+}
+
+
+def test_the_policy_schema_is_frozen():
+    assert {section: set(fields) for section, fields in policy.KNOWN_FIELDS.items()} == FROZEN_SCHEMA
+    assert policy.DEPRECATED_FIELDS == {"review.carry_unchanged_diff"}
+
+
+def test_the_example_uses_exactly_the_frozen_schema():
     example = tomllib.loads(
         (ROOT / "examples" / "merge-guard.toml").read_text(encoding="utf-8"))
-    assert {section: frozenset(fields) for section, fields in example.items()} == policy.KNOWN_FIELDS
-    assert policy.DEPRECATED_FIELDS == {"review.carry_unchanged_diff"}
-    assert "carry_unchanged_diff" in policy.KNOWN_FIELDS["review"]
+    assert {section: set(fields) for section, fields in example.items()} == FROZEN_SCHEMA
 
 
 def test_this_repository_policy_uses_only_known_fields():

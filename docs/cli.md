@@ -12,7 +12,7 @@ not a patch.
 
 | Input | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `mode` | yes | — | `review` publishes the gate status; `merge` lands one eligible pull request; `status` is the read-only verdict |
+| `mode` | yes | — | `review` publishes the gate status; `merge` lands one eligible pull request. `status` is CLI-only (see below) |
 | `policy` | no | `.github/merge-guard.toml` | Path to the consumer policy file, relative to the repository root |
 | `token` | no | the workflow token | Token used by `gh` |
 
@@ -26,14 +26,16 @@ engine; the engine is the `merge_guard` package.
 python3 scripts/merge_guard.py <mode> [--policy PATH] [--apply] [--json] [--version]
 ```
 
-- `status` — read-only. It computes the review verdict and writes nothing.
-  `--apply` with `status` is an unusable input: exit 2, refusal on stderr.
+- `status` — read-only, **CLI only**. It computes the review verdict and writes
+  nothing. The action always passes `--apply`, so `mode: status` through the
+  action is refused; use the command line for it. `--apply` with `status` is an
+  unusable input: exit 2, refusal on stderr.
 - `review` — with `--apply`, publishes the gate status for the current heads.
   Without `--apply` it is a dry run.
 - `merge` — with `--apply`, merges at most one eligible pull request. Without
   `--apply` it lists what it would decide.
 - `--json` is accepted explicitly for scripted callers. It changes nothing:
-  JSON is the only stdout format.
+  JSON is the only stdout format on a completed run.
 
 ## Exit codes
 
@@ -45,11 +47,14 @@ python3 scripts/merge_guard.py <mode> [--policy PATH] [--apply] [--json] [--vers
 
 ## Output
 
-stdout is one JSON object:
+stdout is one JSON object on a completed run:
 
 ```json
 {"mode": "<mode>", "apply": false, "result": {"heads": {"<sha>": ["pending", "<reason>"]}}}
 ```
+
+Two exceptions: `--version` and `--help` print text, and a refusal prints no
+stdout object at all — the refusal line goes to stderr.
 
 - `status` and `review` return `result.heads`: a map from head SHA to a
   `[state, reason]` pair.
