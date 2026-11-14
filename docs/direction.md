@@ -27,7 +27,10 @@ is [cli.md](cli.md); nothing here changes it.
    fallback, an event stream for agent sessions, and a local component for task
    branches and publication.
 
-## Layers
+## Target layers
+
+These are the target layers. Today the engine still contains the GitHub
+transport; the forge port (#34) separates it.
 
 | Layer | Owns | Credential |
 |---|---|---|
