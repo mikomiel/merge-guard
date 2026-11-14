@@ -8,6 +8,7 @@ type, the tag shape, the version source or the identity that triggers checks.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import tomllib
@@ -104,3 +105,24 @@ def test_the_python_updater_targets_exist_in_the_shape_it_rewrites():
     assert SEMVER.fullmatch(project["project"]["version"])
     init_text = (ROOT / "merge_guard" / "__init__.py").read_text(encoding="utf-8")
     assert re.search(r'^__version__ = "\d+\.\d+\.\d+"$', init_text, re.MULTILINE)
+
+
+def test_the_project_is_metadata_only():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "build-system" not in project
+
+
+def test_the_release_metadata_stays_outside_the_ordinary_allowlist():
+    # The release pull request always changes a version-bearing path, so the gate
+    # must never merge it: that is what makes merging it the release decision.
+    policy = tomllib.loads(
+        (ROOT / ".github" / "merge-guard.toml").read_text(encoding="utf-8")
+    )
+    ordinary = policy["paths"]["ordinary"]
+    for path in (
+        "pyproject.toml",
+        "merge_guard/__init__.py",
+        "release-please-config.json",
+        ".release-please-manifest.json",
+    ):
+        assert not any(fnmatch.fnmatch(path, pattern) for pattern in ordinary), path
