@@ -155,3 +155,61 @@ def test_write_replaces_the_closure_when_paths_are_given(tmp_path):
         "scripts/assurance.py",
         "scripts/other.py",
     ]
+
+
+def test_a_parent_symlink_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    (root / "alias").symlink_to("scripts")
+    digest, size = release_manifest.digest(root / "scripts" / "assurance.py")
+    manifest = _manifest(root)
+    manifest["entrypoints"] = ["alias/assurance.py"]
+    manifest["files"] = {"alias/assurance.py": {"sha256": digest, "bytes": size}}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("traverses a symlink" in finding for finding in findings)
+
+
+def test_an_escaping_parent_symlink_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = outside / "payload.py"
+    payload.write_text("print('outside')\n", encoding="utf-8")
+    (root / "escape").symlink_to(outside)
+    digest, size = release_manifest.digest(payload)
+    manifest = _manifest(root)
+    manifest["entrypoints"] = ["escape/payload.py"]
+    manifest["files"] = {"escape/payload.py": {"sha256": digest, "bytes": size}}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("traverses a symlink" in finding for finding in findings)
+
+
+def test_a_refused_write_leaves_the_manifest_unchanged(tmp_path):
+    root = _repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "payload.py").write_text("print('outside')\n", encoding="utf-8")
+    (root / "alias").symlink_to("scripts")
+    (root / "escape").symlink_to(outside)
+    before = (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8")
+    for relative in ("alias/assurance.py", "escape/payload.py"):
+        findings = release_manifest.write(root, [relative])
+        assert any("symlink" in finding for finding in findings), relative
+        assert (
+            root / release_manifest.MANIFEST_NAME
+        ).read_text(encoding="utf-8") == before
+
+
+def test_duplicate_keys_are_refused(tmp_path):
+    root = _repo(tmp_path)
+    path = root / release_manifest.MANIFEST_NAME
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        '"schema": "release-manifest.v1",',
+        '"schema": "release-manifest.v1",\n  "schema": "release-manifest.v1",',
+        1,
+    )
+    path.write_text(text, encoding="utf-8")
+    findings = release_manifest.check(root)
+    assert any("duplicate key" in finding for finding in findings)

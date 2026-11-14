@@ -67,12 +67,27 @@ def _closure_path(root: Path, relative: str) -> tuple[Path | None, str | None]:
         return None, "path is not in normalised repository-relative form"
     if relative == MANIFEST_NAME:
         return None, "the manifest never lists itself"
-    target = root.joinpath(*candidate.parts)
+    current = root
+    for part in candidate.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return None, "path traverses a symlink; a closure names regular files"
+    target = current / candidate.parts[-1]
     if target.is_symlink():
         return None, "path is a symlink; a closure names regular files"
     if not target.is_file():
         return None, "path is missing or not a regular file"
     return target, None
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Refuse a JSON object that declares the same key twice."""
+    seen: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r}")
+        seen[key] = value
+    return seen
 
 
 def _load(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
@@ -84,9 +99,11 @@ def _load(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     except (OSError, ValueError) as exc:
         return None, [_finding(MANIFEST_NAME, f"missing or unreadable: {exc}")]
     try:
-        manifest = json.loads(text)
+        manifest = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
         return None, [_finding(MANIFEST_NAME, f"not valid JSON: {exc}")]
+    except ValueError as exc:
+        return None, [_finding(MANIFEST_NAME, f"invalid JSON object: {exc}")]
     if not isinstance(manifest, dict):
         return None, [_finding(MANIFEST_NAME, "must be a JSON object")]
     return manifest, []
