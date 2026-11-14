@@ -65,6 +65,9 @@ python -m pytest -q
   `checks` fails when a declared file differs from it, or is not a regular blob
   in that commit. Extending the closure is a release decision, so the file stays
   outside the ordinary allowlist.
+- Release Please owns the version, the changelog and the tag. One release pull
+  request bumps `pyproject.toml` and `merge_guard/__init__.py` together; a
+  person merges it. Do not tag by hand and never move a published tag.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary
