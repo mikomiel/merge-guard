@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -364,15 +365,18 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     problems = _declaration_findings(updated, root, entries)
     if problems:
         return problems
-    temporary = root / f".{MANIFEST_NAME}.tmp"
+    mode = (root / MANIFEST_NAME).stat().st_mode & 0o777
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=root, prefix=f".{MANIFEST_NAME}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
     try:
-        temporary.write_text(
-            json.dumps(updated, indent=2, sort_keys=False) + "\n", encoding="utf-8"
-        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(updated, indent=2, sort_keys=False) + "\n")
+        os.chmod(temporary, mode)
         os.replace(temporary, root / MANIFEST_NAME)
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        temporary.unlink(missing_ok=True)
     return []
 
 

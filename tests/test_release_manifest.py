@@ -14,6 +14,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from scripts import release_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -375,3 +377,38 @@ def test_a_refused_write_requires_a_committed_manifest(tmp_path):
     findings = release_manifest.write(root, ["scripts/assurance.py"])
     assert any("differs from HEAD" in finding for finding in findings)
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_planted_temporary_symlink_is_not_followed(tmp_path):
+    root = _repo(tmp_path)
+    target = root / "scripts" / "assurance.py"
+    target.write_text("print('new')\n", encoding="utf-8")
+    _commit(root)
+    planted = root / f".{release_manifest.MANIFEST_NAME}.tmp"
+    planted.symlink_to(release_manifest.MANIFEST_NAME)
+    assert release_manifest.write(root) == []
+    manifest_path = root / release_manifest.MANIFEST_NAME
+    assert not manifest_path.is_symlink()
+    assert planted.is_symlink()
+    digest, size = release_manifest.digest(target)
+    assert _manifest(root)["files"]["scripts/assurance.py"] == {
+        "sha256": digest,
+        "bytes": size,
+    }
+
+
+def test_a_failed_replace_leaves_the_manifest_unchanged(tmp_path, monkeypatch):
+    root = _repo(tmp_path)
+    target = root / "scripts" / "assurance.py"
+    target.write_text("print('new')\n", encoding="utf-8")
+    _commit(root)
+    manifest_path = root / release_manifest.MANIFEST_NAME
+    before = manifest_path.read_bytes()
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("replace refused")
+
+    monkeypatch.setattr(release_manifest.os, "replace", refuse)
+    with pytest.raises(OSError):
+        release_manifest.write(root)
+    assert manifest_path.read_bytes() == before
