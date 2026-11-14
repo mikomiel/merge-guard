@@ -5,7 +5,8 @@ CI result both belong to the exact commit being merged, and it names the rule
 that refused. Consumers install it as a composite action pinned by commit
 SHA. Licence: Apache-2.0. GitHub is the only writable source and pull-request
 surface; the target branch is `main`.
-Non-goals: a package, a container image, a service.
+Non-goals: a hosted or multi-tenant service, and a registry release before the
+command-line contract settles. `docs/direction.md` records the direction.
 
 ## Checks
 
