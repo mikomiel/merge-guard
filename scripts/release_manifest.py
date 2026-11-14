@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -90,6 +91,45 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return seen
 
 
+def _tree_modes(root: Path) -> tuple[dict[str, str] | None, str | None]:
+    """Map every path in the checked-out commit to its Git file mode.
+
+    A closure names files a consumer extracts from the tag, so presence in the
+    checkout is not enough: repository metadata, an untracked file and a
+    submodule all exist on disk without being a regular blob in the commit.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        return None, f"git is unavailable: {exc}"
+    if completed.returncode != 0:
+        message = completed.stderr.decode("utf-8", "replace").strip()
+        return None, f"not a git checkout with a readable HEAD: {message}"
+    modes: dict[str, str] = {}
+    for record in completed.stdout.split(b"\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition(b"\t")
+        parts = meta.split(b" ")
+        if len(parts) != 3:
+            return None, "git ls-tree output is not understood"
+        modes[path.decode("utf-8", "surrogateescape")] = parts[0].decode("ascii")
+    return modes, None
+
+
+def _tree_finding(modes: dict[str, str], relative: str) -> str | None:
+    mode = modes.get(relative)
+    if mode is None:
+        return "path is not tracked in HEAD"
+    if mode not in {"100644", "100755"}:
+        return f"path is not a regular file in HEAD (mode {mode})"
+    return None
+
+
 def _load(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     path = root / MANIFEST_NAME
     if path.is_symlink():
@@ -144,6 +184,11 @@ def check(root: Path) -> list[str]:
     if not isinstance(files, dict) or not isinstance(entrypoints, list):
         return findings
 
+    modes, tree_problem = _tree_modes(root)
+    if modes is None:
+        findings.append(_finding(MANIFEST_NAME, tree_problem or "no tree"))
+        return findings
+
     for relative, entry in sorted(files.items()):
         if not isinstance(relative, str):
             findings.append(_finding(MANIFEST_NAME, "a 'files' key is not a string"))
@@ -163,6 +208,10 @@ def check(root: Path) -> list[str]:
         target, problem = _closure_path(root, relative)
         if problem is not None:
             findings.append(_finding(relative, problem))
+            continue
+        tree_finding = _tree_finding(modes, relative)
+        if tree_finding is not None:
+            findings.append(_finding(relative, tree_finding))
             continue
         assert target is not None
         actual, actual_size = digest(target)
@@ -195,11 +244,19 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     entrypoints = manifest["entrypoints"]
     closure = sorted(paths) if paths else sorted(files)
 
+    modes, tree_problem = _tree_modes(root)
+    if modes is None:
+        return [_finding(MANIFEST_NAME, tree_problem or "no tree")]
+
     replaced: dict[str, dict[str, Any]] = {}
     for relative in closure:
         target, problem = _closure_path(root, relative)
         if problem is not None:
             findings.append(_finding(relative, problem))
+            continue
+        tree_finding = _tree_finding(modes, relative)
+        if tree_finding is not None:
+            findings.append(_finding(relative, tree_finding))
             continue
         assert target is not None
         actual, size = digest(target)

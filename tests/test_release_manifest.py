@@ -10,6 +10,7 @@ what a consumer imports.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from scripts import release_manifest
@@ -17,12 +18,39 @@ from scripts import release_manifest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _commit(root: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "add", "-A"], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "test",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
 def _repo(tmp_path: Path) -> Path:
-    """A tiny repository whose manifest matches its tree."""
+    """A tiny repository whose manifest matches its committed tree."""
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True)
     target = root / "scripts" / "assurance.py"
     target.write_text("print('classify')\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(root), "init", "-q"], check=True, capture_output=True
+    )
+    _commit(root)
     digest, size = release_manifest.digest(target)
     manifest = {
         "schema": release_manifest.SCHEMA,
@@ -141,6 +169,7 @@ def test_write_refuses_to_drop_a_declared_entrypoint(tmp_path):
     root = _repo(tmp_path)
     other = root / "scripts" / "other.py"
     other.write_text("print('other')\n", encoding="utf-8")
+    _commit(root)
     findings = release_manifest.write(root, ["scripts/other.py"])
     assert any("scripts/assurance.py" in finding for finding in findings)
     assert "scripts/other.py" not in _manifest(root)["files"]
@@ -150,6 +179,7 @@ def test_write_replaces_the_closure_when_paths_are_given(tmp_path):
     root = _repo(tmp_path)
     other = root / "scripts" / "other.py"
     other.write_text("print('other')\n", encoding="utf-8")
+    _commit(root)
     assert release_manifest.write(root, ["scripts/assurance.py", "scripts/other.py"]) == []
     assert sorted(_manifest(root)["files"]) == [
         "scripts/assurance.py",
@@ -213,3 +243,36 @@ def test_duplicate_keys_are_refused(tmp_path):
     path.write_text(text, encoding="utf-8")
     findings = release_manifest.check(root)
     assert any("duplicate key" in finding for finding in findings)
+
+
+def test_an_untracked_file_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    local = root / "scripts" / "local.py"
+    local.write_text("print('local')\n", encoding="utf-8")
+    digest, size = release_manifest.digest(local)
+    manifest = _manifest(root)
+    manifest["files"]["scripts/local.py"] = {"sha256": digest, "bytes": size}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("not tracked in HEAD" in finding for finding in findings)
+
+
+def test_repository_metadata_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    metadata = root / ".git" / "description"
+    digest, size = release_manifest.digest(metadata)
+    manifest = _manifest(root)
+    manifest["files"][".git/description"] = {"sha256": digest, "bytes": size}
+    _rewrite(root, manifest)
+    findings = release_manifest.check(root)
+    assert any("not tracked in HEAD" in finding for finding in findings)
+
+
+def test_a_refused_write_leaves_untracked_bytes_out(tmp_path):
+    root = _repo(tmp_path)
+    local = root / "scripts" / "local.py"
+    local.write_text("print('local')\n", encoding="utf-8")
+    before = (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8")
+    findings = release_manifest.write(root, ["scripts/assurance.py", "scripts/local.py"])
+    assert any("not tracked in HEAD" in finding for finding in findings)
+    assert (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8") == before
