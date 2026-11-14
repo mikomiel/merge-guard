@@ -41,6 +41,26 @@ class Unusable(ValueError):
     """A complete policy decision cannot be established from these inputs."""
 
 
+def unknown_fields(data: Any) -> list[str]:
+    """Fields the schema does not accept, as dotted paths.
+
+    A missing or mistyped known section is left to :func:`load_policy`, which
+    reports it as ``policy_missing_field``; this function only reports the
+    fields nothing reads.
+    """
+    if not isinstance(data, dict):
+        raise Unusable("policy_not_a_table")
+    found = [key for key in data if key not in KNOWN_FIELDS]
+    for section, allowed in KNOWN_FIELDS.items():
+        value = data.get(section)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            continue
+        found += [f"{section}.{key}" for key in value if key not in allowed]
+    return found
+
+
 @dataclass(frozen=True)
 class Policy:
     repository: str
@@ -60,7 +80,25 @@ class Policy:
     carry_unchanged_diff: bool
 
 
+#: Every field the schema accepts. An unknown field is a refusal, not a warning:
+#: a typo would otherwise silently change which rule runs. ``docs/cli.md`` owns
+#: the prose and ``tests/test_contract.py`` pins these sets against it.
+KNOWN_FIELDS: dict[str, frozenset[str]] = {
+    "repository": frozenset({"name", "base_branch"}),
+    "review": frozenset({
+        "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
+        "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",
+    }),
+    "paths": frozenset({"ordinary", "dependency_update_exemption"}),
+}
+#: Accepted today, removed when the clean-refresh rule replaces it.
+DEPRECATED_FIELDS = frozenset({"review.carry_unchanged_diff"})
+
+
 def load_policy(data: Any) -> Policy:
+    unknown = unknown_fields(data)
+    if unknown:
+        raise Unusable("policy_unknown_field: " + ", ".join(sorted(unknown)))
     try:
         repo = data["repository"]
         review = data["review"]

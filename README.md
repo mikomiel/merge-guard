@@ -53,6 +53,10 @@ A release is consumed as a pinned, generated copy rather than a dependency
 upgrade. [docs/pin-bump.md](docs/pin-bump.md) is the procedure: what a release
 guarantees, how to record the pin, how to bump it, and the states to avoid.
 
+The action inputs, the command line, the JSON output, the exit codes and the
+policy schema are one contract: [docs/cli.md](docs/cli.md). It is the file to
+read before building anything on top of the gate.
+
 ## Carried approvals
 
 Required branches-up-to-date stays on, so a base advance normally invalidates
@@ -69,6 +73,11 @@ in `[review]` turns it off, and then an approval binds to the commit it was give
 for: an identical patch on a new head inherits nothing and needs its own
 approval. It defaults to `true` so a consumer that already relies on it keeps the
 behaviour it pinned.
+
+The key is **deprecated**. A refresh rule that also proves the reviewed files are
+unchanged replaces it, and that release removes the key; until then it is
+accepted, and [docs/cli.md](docs/cli.md) records the removal as a breaking
+change.
 
 ## Development
 
