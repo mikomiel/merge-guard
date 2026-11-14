@@ -158,23 +158,27 @@ def _blob_digest(root: Path, oid: str) -> tuple[tuple[str, int] | None, str | No
     return (hashlib.sha256(completed.stdout).hexdigest(), len(completed.stdout)), None
 
 
-def _load(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
+def _load(root: Path) -> tuple[dict[str, Any] | None, bytes, list[str]]:
     path = root / MANIFEST_NAME
     if path.is_symlink():
-        return None, [_finding(MANIFEST_NAME, "must be a regular file, not a symlink")]
+        return None, b"", [_finding(MANIFEST_NAME, "must be a regular file, not a symlink")]
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, ValueError) as exc:
-        return None, [_finding(MANIFEST_NAME, f"missing or unreadable: {exc}")]
+        raw = path.read_bytes()
+    except OSError as exc:
+        return None, b"", [_finding(MANIFEST_NAME, f"missing or unreadable: {exc}")]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, b"", [_finding(MANIFEST_NAME, f"not valid UTF-8: {exc}")]
     try:
         manifest = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
-        return None, [_finding(MANIFEST_NAME, f"not valid JSON: {exc}")]
+        return None, b"", [_finding(MANIFEST_NAME, f"not valid JSON: {exc}")]
     except ValueError as exc:
-        return None, [_finding(MANIFEST_NAME, f"invalid JSON object: {exc}")]
+        return None, b"", [_finding(MANIFEST_NAME, f"invalid JSON object: {exc}")]
     if not isinstance(manifest, dict):
-        return None, [_finding(MANIFEST_NAME, "must be a JSON object")]
-    return manifest, []
+        return None, b"", [_finding(MANIFEST_NAME, "must be a JSON object")]
+    return manifest, raw, []
 
 
 def _validate_structure(manifest: dict[str, Any]) -> list[str]:
@@ -201,20 +205,37 @@ def _validate_structure(manifest: dict[str, Any]) -> list[str]:
     return findings
 
 
-def check(root: Path) -> list[str]:
-    """Return every finding for a tree whose manifest does not describe it."""
-    manifest, findings = _load(root)
-    if manifest is None:
-        return findings
-    findings += _validate_structure(manifest)
+def _manifest_self_problem(
+    root: Path, entries: dict[str, tuple[str, str]], raw: bytes
+) -> str | None:
+    """Refuse a manifest whose committed form differs from the copy just read.
+
+    A Git attribute can transform a checkout, so a manifest that is only valid
+    after conversion is not the manifest a consumer extracts from the tag.
+    """
+    entry = entries.get(MANIFEST_NAME)
+    if entry is None:
+        return "the manifest is not tracked in HEAD"
+    mode, oid = entry
+    if mode not in {"100644", "100755"}:
+        return f"the manifest is not a regular file in HEAD (mode {mode})"
+    blob, problem = _blob_digest(root, oid)
+    if blob is None:
+        return problem or "the manifest blob is unreadable"
+    if blob != (hashlib.sha256(raw).hexdigest(), len(raw)):
+        return "the working-tree copy differs from HEAD; commit or discard it"
+    return None
+
+
+def _declaration_findings(
+    manifest: dict[str, Any],
+    root: Path,
+    entries: dict[str, tuple[str, str]],
+) -> list[str]:
+    findings: list[str] = []
     files = manifest.get("files")
     entrypoints = manifest.get("entrypoints")
     if not isinstance(files, dict) or not isinstance(entrypoints, list):
-        return findings
-
-    entries, tree_problem = _tree_entries(root)
-    if entries is None:
-        findings.append(_finding(MANIFEST_NAME, tree_problem or "no tree"))
         return findings
 
     for relative, entry in sorted(files.items()):
@@ -264,16 +285,35 @@ def check(root: Path) -> list[str]:
     return findings
 
 
+def check(root: Path) -> list[str]:
+    """Return every finding for a commit whose manifest does not describe it."""
+    manifest, raw, findings = _load(root)
+    if manifest is None:
+        return findings
+    findings += _validate_structure(manifest)
+    if not isinstance(manifest.get("files"), dict):
+        return findings
+
+    entries, tree_problem = _tree_entries(root)
+    if entries is None:
+        findings.append(_finding(MANIFEST_NAME, tree_problem or "no tree"))
+        return findings
+    self_problem = _manifest_self_problem(root, entries, raw)
+    if self_problem is not None:
+        findings.append(_finding(MANIFEST_NAME, self_problem))
+        return findings
+    return findings + _declaration_findings(manifest, root, entries)
+
+
 def write(root: Path, paths: list[str] | None = None) -> list[str]:
     """Regenerate the manifest; *paths* replaces the closure when given."""
-    manifest, findings = _load(root)
+    manifest, _raw, findings = _load(root)
     if manifest is None:
         return findings
     findings += _validate_structure(manifest)
     if findings:
         return findings
     files = manifest["files"]
-    entrypoints = manifest["entrypoints"]
     closure = sorted(paths) if paths else sorted(files)
 
     entries, tree_problem = _tree_entries(root)
@@ -300,7 +340,7 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     if findings:
         return findings
 
-    for entrypoint in entrypoints:
+    for entrypoint in manifest["entrypoints"]:
         if entrypoint not in replaced:
             return [
                 _finding(
@@ -315,7 +355,7 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     (root / MANIFEST_NAME).write_text(
         json.dumps(updated, indent=2, sort_keys=False) + "\n", encoding="utf-8"
     )
-    return check(root)
+    return _declaration_findings(updated, root, entries)
 
 
 def main(argv: list[str]) -> int:

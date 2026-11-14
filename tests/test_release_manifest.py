@@ -19,10 +19,10 @@ from scripts import release_manifest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _commit(root: Path) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), "add", "-A"], check=True, capture_output=True
-    )
+def _commit(root: Path, *paths: str) -> None:
+    add = ["git", "-C", str(root), "add"]
+    add.extend(paths) if paths else add.append("-A")
+    subprocess.run(add, check=True, capture_output=True)
     subprocess.run(
         [
             "git",
@@ -62,6 +62,7 @@ def _repo(tmp_path: Path) -> Path:
     (root / release_manifest.MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
+    _commit(root, release_manifest.MANIFEST_NAME)
     return root
 
 
@@ -73,6 +74,7 @@ def _rewrite(root: Path, manifest: dict) -> None:
     (root / release_manifest.MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
+    _commit(root, release_manifest.MANIFEST_NAME)
 
 
 def test_the_repository_manifest_matches_the_tree():
@@ -160,6 +162,7 @@ def test_write_refreshes_digests(tmp_path):
     (root / "scripts" / "assurance.py").write_text("print('new')\n", encoding="utf-8")
     _commit(root)
     assert release_manifest.write(root) == []
+    _commit(root, release_manifest.MANIFEST_NAME)
     assert release_manifest.check(root) == []
     digest, size = release_manifest.digest(root / "scripts" / "assurance.py")
     assert _manifest(root)["files"]["scripts/assurance.py"] == {
@@ -335,3 +338,28 @@ def test_a_refused_write_keeps_a_committed_symlink_out(tmp_path):
     findings = release_manifest.write(root, ["scripts/assurance.py", "link.py"])
     assert any("mode 120000" in finding for finding in findings)
     assert (root / release_manifest.MANIFEST_NAME).read_text(encoding="utf-8") == before
+
+def test_an_uncommitted_manifest_edit_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    path = root / release_manifest.MANIFEST_NAME
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    findings = release_manifest.check(root)
+    assert any("differs from HEAD" in finding for finding in findings)
+
+
+def test_a_transformed_manifest_checkout_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    (root / ".gitattributes").write_text(
+        "release-manifest.json text eol=crlf\n", encoding="utf-8"
+    )
+    _commit(root)
+    path = root / release_manifest.MANIFEST_NAME
+    path.unlink()
+    subprocess.run(
+        ["git", "-C", str(root), "checkout", "--", release_manifest.MANIFEST_NAME],
+        check=True,
+        capture_output=True,
+    )
+    assert b"\r\n" in path.read_bytes()
+    findings = release_manifest.check(root)
+    assert any("differs from HEAD" in finding for finding in findings)
