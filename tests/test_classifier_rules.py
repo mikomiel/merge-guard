@@ -10,10 +10,12 @@ and the worked example match the code. Every layout in here is synthetic.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,29 @@ def _two_rules(first: str, second: str) -> dict:
     ])
 
 
+def _with_id(rule_id: str) -> dict:
+    return _with(rule=[{"id": rule_id, "class": "C1", "exact": ["a.txt"]}])
+
+
+#: Characters an id may not hold, as a (label, character) pair: each would end the
+#: row, or the line, that the id is printed on.
+CONTROL_CHARACTERS = [
+    ("a tab", "\t"),
+    ("a newline", "\n"),
+    ("a carriage return", "\r"),
+    ("a vertical tab", "\x0b"),
+    ("a form feed", "\x0c"),
+    ("a file separator", "\x1c"),
+    ("a NUL", "\0"),
+    ("a bell", "\a"),
+    ("an escape", "\x1b"),
+    ("a DEL", "\x7f"),
+    ("a C1 next line", "\x85"),
+    ("a line separator", "\u2028"),
+    ("a paragraph separator", "\u2029"),
+]
+
+
 #: (label, data, stable reason, a fragment the detail must contain)
 REFUSALS = [
     ("top level is not a table", lambda: ["rule"], "rules_wrong_type", "(top level)"),
@@ -99,6 +124,11 @@ REFUSALS = [
      "rules_rule_id_empty", "rule[0].id"),
     ("id is only whitespace", lambda: _with(rule=[{"id": "  ", "class": "C1", "exact": ["a.txt"]}]),
      "rules_rule_id_empty", "rule[0].id"),
+    *[
+        (f"id holds {label}", lambda char=char: _with_id(f"A{char}B"),
+         "rules_rule_id_invalid", "rule[0].id")
+        for label, char in CONTROL_CHARACTERS
+    ],
     ("id repeats", lambda: _two_rules("ONE", "ONE"), "rules_rule_id_duplicate", "ONE"),
     *[
         (f"id reuses the engine id {engine_id}", lambda engine_id=engine_id: _two_rules("ONE", engine_id),
@@ -207,6 +237,28 @@ def test_a_file_that_is_not_toml_is_refused(tmp_path):
         assurance.load_rules(path)
 
 
+def test_nesting_deeper_than_the_parser_can_follow_is_refused(tmp_path):
+    path = tmp_path / "rules.toml"
+    path.write_text("x = " + "[" * 5000 + "]" * 5000 + "\n", encoding="utf-8")
+    with pytest.raises(assurance.RulesUnusable, match="rules_not_toml: .*nesting too deep"):
+        assurance.load_rules(path)
+
+
+def test_the_cli_refuses_a_rule_file_nested_too_deep(tmp_path):
+    path = tmp_path / "rules.toml"
+    path.write_text("x = " + "[" * 5000 + "]" * 5000 + "\n", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), "--rules", str(path)],
+        input="README.md\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr == f"merge_guard_refused: rules_not_toml: {path}: nesting too deep\n"
+
+
 def test_a_repeated_toml_key_is_refused_by_the_parser(tmp_path):
     path = tmp_path / "rules.toml"
     path.write_text(
@@ -220,6 +272,66 @@ def test_a_repeated_toml_key_is_refused_by_the_parser(tmp_path):
 
 def test_a_file_loads_the_same_from_a_string_and_from_a_path():
     assert assurance.load_rules(str(EXAMPLE)) == assurance.load_rules(EXAMPLE)
+
+
+#: Ids a rule file can write with a control character, as (label, the id as it is
+#: spelled between the quotes of a TOML basic string). The format forbids a raw
+#: control character there, a tab apart, so the others have to be escapes.
+CONTROL_IDS_IN_TOML = [
+    ("an escaped tab", r"A\tB"),
+    ("a raw tab", "A\tB"),
+    ("an escaped newline", r"A\nB"),
+    ("an escaped carriage return", r"A\rB"),
+    ("an escaped form feed", r"A\fB"),
+    ("an escaped bell", r"A\u0007B"),
+    ("an escaped escape", r"A\u001bB"),
+    ("an escaped DEL", r"A\u007fB"),
+    ("an escaped C1 next line", r"A\u0085B"),
+    ("an escaped line separator", r"A B"),
+    ("an escaped paragraph separator", r"A B"),
+    ("a control character first", r"\tAB"),
+    ("a control character last", r"AB\n"),
+]
+
+
+def _id_file(directory: Path, spelled: str) -> Path:
+    """A rule file whose only rule has the id *spelled*, as TOML source between quotes."""
+    path = directory / "rules.toml"
+    path.write_text(
+        f'[[rule]]\nid = "{spelled}"\nclass = "C1"\nexact = ["a.txt"]\n[doc_only]\n[model_definition]\n',
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    ("label", "spelled"), CONTROL_IDS_IN_TOML, ids=[case[0] for case in CONTROL_IDS_IN_TOML]
+)
+def test_a_rule_file_whose_id_holds_a_control_character_is_refused(tmp_path, label, spelled):
+    with pytest.raises(assurance.RulesUnusable) as caught:
+        assurance.load_rules(_id_file(tmp_path, spelled))
+    # The detail names the field: the id itself is the text that must not be echoed.
+    assert str(caught.value) == "rules_rule_id_invalid: rule[0].id"
+
+
+def test_every_control_character_is_refused_in_an_id():
+    """Enumerated from the Unicode tables, not listed by hand: all of category ``Cc``,
+    and the two line separators that line-splitting readers also break on."""
+    controls = [
+        chr(code) for code in range(sys.maxunicode + 1) if unicodedata.category(chr(code)) == "Cc"
+    ]
+    assert len(controls) == 65, "U+0000-U+001F and U+007F-U+009F: the enumeration can find them"
+    for char in [*controls, " ", " "]:
+        for rule_id in (f"A{char}B", f"{char}AB", f"AB{char}"):
+            assert _refusal(_with_id(rule_id)) == "rules_rule_id_invalid: rule[0].id", repr(rule_id)
+
+
+@pytest.mark.parametrize(
+    "rule_id", ["ONE", "C1-GATE-AUTHORITY", "two words", "règle-ß", "規則"]
+)
+def test_an_id_without_a_control_character_is_accepted(rule_id):
+    rules = assurance.validate_rules(_with_id(rule_id))
+    assert [rule.rule_id for rule in rules.path_rules] == [rule_id]
 
 
 # The reference set and the worked example.
@@ -255,16 +367,99 @@ def test_the_worked_example_is_not_the_reference_layout():
 
 
 def test_a_copy_of_the_module_has_no_layout_of_its_own(tmp_path):
-    """Without its reference file the module refuses to load: it carries no rules."""
+    """Without its reference file the module refuses to load: it carries no rules.
+
+    Run as a script that is the stable refusal: exit 2, no rows, one line on stderr.
+    """
     copy = tmp_path / "assurance.py"
     shutil.copy(SCRIPT, copy)
     done = subprocess.run(
         [sys.executable, "-I", str(copy)], input="repos.yaml\n",
         capture_output=True, text=True, check=False,
     )
-    assert done.returncode != 0
+    # The module resolves its own location, so the message names the resolved path.
+    missing = copy.resolve().with_name("reference-rules.toml")
+    assert done.returncode == 2
     assert done.stdout == ""
-    assert "rules_unreadable" in done.stderr
+    assert done.stderr == f"merge_guard_refused: rules_unreadable: {missing}: FileNotFoundError\n"
+
+
+#: Ways the reference file beside a copy of the module can be unusable, as (label,
+#: how to write it, the refusal reason as a regular expression in which ``{path}``
+#: stands for the file). ``None`` leaves the file out and ``"directory"`` puts a
+#: directory in its place.
+BROKEN_REFERENCES = [
+    ("missing", None, r"rules_unreadable: {path}: FileNotFoundError"),
+    ("a directory", "directory", r"rules_unreadable: {path}: IsADirectoryError"),
+    ("not UTF-8", b"\xff\xfe[[rule]]\n", r"rules_unreadable: {path}: UnicodeDecodeError"),
+    ("not TOML", "[[rule]\nid = 'ONE'\n", r"rules_not_toml: {path}: [^\n]+"),
+    ("fails validation", "[doc_only]\n[model_definition]\n", r"rules_missing_section: rule"),
+    ("an id with a control character",
+     '[[rule]]\nid = "A\\tB"\nclass = "C1"\nexact = ["a.txt"]\n[doc_only]\n[model_definition]\n',
+     r"rules_rule_id_invalid: rule\[0\]\.id"),
+]
+
+
+def _module_copy(tmp_path: Path, how) -> tuple[Path, Path]:
+    """A copy of the module in its own directory, with the reference file made as *how* says."""
+    copy = tmp_path / "assurance.py"
+    shutil.copy(SCRIPT, copy)
+    reference = copy.resolve().with_name("reference-rules.toml")
+    if how == "directory":
+        reference.mkdir()
+    elif isinstance(how, bytes):
+        reference.write_bytes(how)
+    elif how is not None:
+        reference.write_text(how, encoding="utf-8")
+    return copy, reference
+
+
+def _refusal_pattern(pattern: str, reference: Path) -> str:
+    return pattern.replace("{path}", re.escape(str(reference)))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [(), ("--rules", str(EXAMPLE)), ("--bogus",)],
+    ids=["no arguments", "a usable --rules file", "a malformed command line"],
+)
+@pytest.mark.parametrize(
+    ("label", "how", "pattern"), BROKEN_REFERENCES, ids=[case[0] for case in BROKEN_REFERENCES]
+)
+def test_a_broken_reference_file_is_the_stable_refusal_not_a_traceback(
+    tmp_path, label, how, pattern, argv
+):
+    """Exit 2, no rows, one refusal line. Whatever the arguments, even a usable
+    ``--rules`` file, they do not hide that the module's own rules are unusable."""
+    copy, reference = _module_copy(tmp_path, how)
+    done = subprocess.run(
+        [sys.executable, "-I", str(copy), *argv], input="repos.yaml\nsrc/auth/login.py\n",
+        capture_output=True, text=True, check=False,
+    )
+    assert done.returncode == 2
+    assert done.stdout == ""
+    refusal = "merge_guard_refused: " + _refusal_pattern(pattern, reference) + "\n"
+    assert re.fullmatch(refusal, done.stderr), done.stderr
+    assert "Traceback" not in done.stderr
+
+
+@pytest.mark.parametrize(
+    ("label", "how", "pattern"), BROKEN_REFERENCES, ids=[case[0] for case in BROKEN_REFERENCES]
+)
+def test_importing_a_copy_with_a_broken_reference_file_fails_closed(
+    tmp_path, monkeypatch, label, how, pattern
+):
+    """In process nothing falls back: the import itself raises, with the same reason."""
+    copy, reference = _module_copy(tmp_path, how)
+    name = "assurance_copy"
+    spec = importlib.util.spec_from_file_location(name, copy)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)  # dataclasses look a module up by name
+    with pytest.raises(ValueError) as caught:
+        spec.loader.exec_module(module)
+    # The copy defines its own RulesUnusable, so the class cannot be named from here.
+    assert type(caught.value).__name__ == "RulesUnusable"
+    assert re.fullmatch(_refusal_pattern(pattern, reference), str(caught.value)), str(caught.value)
 
 
 def test_the_file_beside_the_module_is_the_policy(tmp_path):
@@ -480,6 +675,20 @@ def test_the_script_never_falls_back_when_the_supplied_file_is_unusable(tmp_path
     assert done.returncode == 2
     assert done.stdout == ""
     assert done.stderr.startswith("merge_guard_refused: rules_unreadable: ")
+
+
+@pytest.mark.parametrize(
+    ("label", "spelled"), CONTROL_IDS_IN_TOML, ids=[case[0] for case in CONTROL_IDS_IN_TOML]
+)
+def test_the_script_refuses_an_id_that_would_inject_a_row(tmp_path, label, spelled):
+    """An id is the first column of each row the script prints, so one holding a tab or a
+    line break would print as extra columns, or as rows no rule produced. The file that
+    defines it is refused instead: exit 2, no rows, the refusal line on stderr."""
+    rules = _id_file(tmp_path, spelled)
+    done = _run_script(tmp_path, "a.txt\n", "--rules", str(rules))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr == "merge_guard_refused: rules_rule_id_invalid: rule[0].id\n"
 
 
 # The documentation.

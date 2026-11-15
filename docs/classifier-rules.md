@@ -14,7 +14,9 @@ with, kept as it was so its results do not change. It is one repository's
 layout, not a recommended default. A repository with another layout supplies its
 own file; the [worked example](#a-worked-example) below is not the reference
 layout. `tests/test_classifier_parity.py` pins that supplying the reference file
-explicitly reports the same rows as supplying nothing.
+explicitly reports the same rows as supplying nothing, and that both reproduce,
+byte for byte, what the classifier printed before its rules became data
+(`tests/fixtures/classifier-golden-rows.txt`).
 
 ## What a rule file decides
 
@@ -56,6 +58,10 @@ prints no rows and exits 2, like the other refusals of this project
 when the exit status is 0. To check a file without classifying anything, run it
 with empty input: exit status 0 means the file is usable.
 
+The script's own `reference-rules.toml` is refused the same way. If it is missing
+or unusable, the script prints the refusal before it reads any argument, so a
+usable `--rules FILE` does not hide it.
+
 In process:
 
 ```python
@@ -79,9 +85,11 @@ file taken from the change lets that change delete the rule that would escalate
 it. The copy on the base branch is the one the change does not control.
 
 The module reads `reference-rules.toml` from its own directory when it is
-imported. Copy the two files together; without the data file the module refuses
-to import rather than classify without rules. It needs Python 3.11 or later for
-`tomllib`.
+imported. Copy the two files together. If that file is missing or unusable,
+importing the module raises `RulesUnusable` rather than classify without rules,
+and nothing falls back to another rule set. Run as a script, the same failure is
+the refusal described above: `merge_guard_refused: <reason>` on stderr, no rows
+and exit status 2. It needs Python 3.11 or later for `tomllib`.
 
 ## The file format
 
@@ -98,12 +106,17 @@ empty `[doc_only]` or `[model_definition]` table is fine, an absent one is not.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `id` | string | yes | The name the classifier reports for the rule. Unique in the file, not blank, and not one of the classifier's own ids. A published id is a contract: callers branch on it. |
+| `id` | string | yes | The name the classifier reports for the rule. Unique in the file, not blank, free of control characters, and not one of the classifier's own ids. A published id is a contract: callers branch on it. |
 | `class` | string | yes | Always `"C1"`. |
 | `exact` | list of strings | one of `exact` and `prefixes` | A path matches when it equals an entry. |
 | `prefixes` | list of strings | one of `exact` and `prefixes` | A path matches when it starts with an entry. An entry is plain text, so write a directory as `dir/`. |
 | `exempt_prefixes` | list of strings | no | A path that starts with an entry is not selected by this rule. |
 | `exempt_suffixes` | list of strings | no | A path that ends with an entry is not selected by this rule. |
+
+The `id` is the first column of every row the script prints, and a refusal can
+name it. A tab, a newline, a carriage return, any other control character
+(Unicode category `Cc`), U+2028 or U+2029 in an id would shift a column or end
+the row early, so a file with such an id is refused.
 
 ### `doc_only`
 
@@ -181,6 +194,7 @@ renamed or reused.
 | `rules_missing_section` | `rule`, `doc_only` or `model_definition` is absent, or `rule` holds no tables. The detail lists every missing section, sorted. |
 | `rules_missing_field` | A rule has no `id` or no `class`, or selects nothing because `exact` and `prefixes` are both absent or empty. |
 | `rules_rule_id_empty` | A rule's `id` is empty or only whitespace. |
+| `rules_rule_id_invalid` | A rule's `id` holds a control character: a tab, a newline, a carriage return, any other character of Unicode category `Cc`, or U+2028 or U+2029. The detail names the field, never the id. |
 | `rules_rule_id_duplicate` | An `id` is used twice, or is one of the classifier's own ids. The detail names the id. |
 | `rules_class_invalid` | A rule's `class` is anything other than `"C1"`. |
 | `rules_entry_invalid` | An entry is almost certainly a mistake. See [Entries](#entries). |

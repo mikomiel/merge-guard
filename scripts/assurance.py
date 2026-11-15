@@ -18,7 +18,11 @@ policy this module was extracted with and its results do not change.
 The classification functions are pure: each takes already-derived facts
 (changed paths, raw diff-shape lines, a :class:`Rules`) and returns a result.
 The only I/O is reading a rule file, in :func:`load_rules` and once at import
-for the reference set. Deriving the facts from the current worktree is
+for the reference set. A reference set that cannot be used fails the import
+with :class:`RulesUnusable`, never with a fallback; run as a script, the same
+failure is the command line's refusal (see :func:`main`).
+
+Deriving the facts from the current worktree is
 ``forge.py``'s ``policy()`` operation (GT-01 2.4), matching how
 ``git_gate/repository.py``'s ``_lane_changed_paths`` already derives the
 changed-path list this module classifies.
@@ -95,6 +99,7 @@ import os
 import re
 import sys
 import tomllib
+import unicodedata
 from collections.abc import Iterable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
@@ -215,6 +220,19 @@ def _unknown_fields(data: dict[str, Any]) -> list[str]:
     return found
 
 
+def _has_control_character(text: str) -> bool:
+    """Whether *text* holds a character that could end an output line early.
+
+    A rule id is the first column of every row the command line prints, and the
+    refusal for a duplicate id names it. A tab would shift the columns, and a
+    newline, a carriage return or any other control character (Unicode category
+    ``Cc``), or U+2028 or U+2029, which line-splitting readers also break on,
+    would start what reads as another row.
+    """
+
+    return any(unicodedata.category(char) == "Cc" or char in "\u2028\u2029" for char in text)
+
+
 def _path_rule(index: int, item: Any, seen: set[str]) -> PathRule:
     where = f"rule[{index}]"
     if not isinstance(item, dict):
@@ -227,6 +245,9 @@ def _path_rule(index: int, item: Any, seen: set[str]) -> PathRule:
         raise RulesUnusable(f"rules_wrong_type: {where}.id")
     if not rule_id.strip():
         raise RulesUnusable(f"rules_rule_id_empty: {where}.id")
+    if _has_control_character(rule_id):
+        # The detail names the field, never the id: the id is the text at fault.
+        raise RulesUnusable(f"rules_rule_id_invalid: {where}.id")
     if rule_id in seen or rule_id in _ENGINE_RULE_IDS:
         raise RulesUnusable(f"rules_rule_id_duplicate: {rule_id}")
     seen.add(rule_id)
@@ -291,13 +312,32 @@ def load_rules(path: str | os.PathLike[str]) -> Rules:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise RulesUnusable(f"rules_not_toml: {path}: {exc}") from exc
+    except RecursionError as exc:
+        # Nesting deeper than the parser can follow is not a usable rule file.
+        raise RulesUnusable(f"rules_not_toml: {path}: nesting too deep") from exc
     return validate_rules(data)
+
+
+def _refuse(reason: RulesUnusable) -> int:
+    """Print the stable refusal line for a rule file that cannot be used; return 2."""
+
+    print(f"merge_guard_refused: {reason}", file=sys.stderr)
+    return 2
 
 
 #: The reference rule set: the policy this module was extracted with. It sits
 #: beside this file, so a copy of the module needs a copy of the file.
 REFERENCE_RULES_PATH = Path(__file__).resolve().with_name("reference-rules.toml")
-_REFERENCE_RULES = load_rules(REFERENCE_RULES_PATH)
+try:
+    _REFERENCE_RULES = load_rules(REFERENCE_RULES_PATH)
+except RulesUnusable as exc:
+    # Without a usable reference set the module must not classify, so importing
+    # it fails closed with the reason. Run as a script, the same failure is the
+    # command line's refusal (exit 2, no rows, no traceback). It comes before
+    # any argument is read, so a usable --rules file cannot hide it.
+    if __name__ != "__main__":
+        raise
+    raise SystemExit(_refuse(exc)) from None
 
 # The default rule set's C3 allowlists stay module attributes, read at call time
 # by :func:`_resolve`: that is how a caller, and the C3 structure tests,
@@ -391,7 +431,9 @@ def main(stdin: Iterable[str], argv: Sequence[str] = ()) -> int:
     set. A file that cannot be used prints ``merge_guard_refused: <reason>`` on
     stderr, prints no rows and returns 2, so empty output means "no path
     matched" only when the status is 0: the paths are never classified against
-    a weaker rule set than the one asked for.
+    a weaker rule set than the one asked for. A reference set that cannot be
+    used is refused the same way when the module runs as a script, before this
+    function is reached and whatever *argv* holds.
     """
 
     rules = None
@@ -402,8 +444,7 @@ def main(stdin: Iterable[str], argv: Sequence[str] = ()) -> int:
         try:
             rules = load_rules(argv[1])
         except RulesUnusable as exc:
-            print(f"merge_guard_refused: {exc}", file=sys.stderr)
-            return 2
+            return _refuse(exc)
     paths = [line.strip() for line in stdin if line.strip()]
     for rule, path in c1_path_rules_by_path(paths, rules=rules):
         print(f"{rule}\t{path}")
