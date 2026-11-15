@@ -124,6 +124,10 @@ REFUSALS = [
      "rules_rule_id_empty", "rule[0].id"),
     ("id is only whitespace", lambda: _with(rule=[{"id": "  ", "class": "C1", "exact": ["a.txt"]}]),
      "rules_rule_id_empty", "rule[0].id"),
+    ("id is only a tab", lambda: _with(rule=[{"id": "\t", "class": "C1", "exact": ["a.txt"]}]),
+     "rules_rule_id_invalid", "rule[0].id"),
+    ("id is only newlines", lambda: _with(rule=[{"id": "\n\n", "class": "C1", "exact": ["a.txt"]}]),
+     "rules_rule_id_invalid", "rule[0].id"),
     *[
         (f"id holds {label}", lambda char=char: _with_id(f"A{char}B"),
          "rules_rule_id_invalid", "rule[0].id")

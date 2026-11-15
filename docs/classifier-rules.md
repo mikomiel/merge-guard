@@ -193,7 +193,7 @@ renamed or reused.
 | `rules_unknown_field` | A section or field that the format does not define, including a misspelling. The detail lists every one, sorted. |
 | `rules_missing_section` | `rule`, `doc_only` or `model_definition` is absent, or `rule` holds no tables. The detail lists every missing section, sorted. |
 | `rules_missing_field` | A rule has no `id` or no `class`, or selects nothing because `exact` and `prefixes` are both absent or empty. |
-| `rules_rule_id_empty` | A rule's `id` is empty or only whitespace. |
+| `rules_rule_id_empty` | A rule's `id` is empty or holds only whitespace that is not a control character. An id of only tabs or newlines is `rules_rule_id_invalid`. |
 | `rules_rule_id_invalid` | A rule's `id` holds a control character: a tab, a newline, a carriage return, any other character of Unicode category `Cc`, or U+2028 or U+2029. The detail names the field, never the id. |
 | `rules_rule_id_duplicate` | An `id` is used twice, or is one of the classifier's own ids. The detail names the id. |
 | `rules_class_invalid` | A rule's `class` is anything other than `"C1"`. |

@@ -243,11 +243,12 @@ def _path_rule(index: int, item: Any, seen: set[str]) -> PathRule:
     rule_id = item["id"]
     if not isinstance(rule_id, str):
         raise RulesUnusable(f"rules_wrong_type: {where}.id")
-    if not rule_id.strip():
-        raise RulesUnusable(f"rules_rule_id_empty: {where}.id")
     if _has_control_character(rule_id):
         # The detail names the field, never the id: the id is the text at fault.
+        # Checked before blankness, so an id of only tabs or newlines is invalid.
         raise RulesUnusable(f"rules_rule_id_invalid: {where}.id")
+    if not rule_id.strip():
+        raise RulesUnusable(f"rules_rule_id_empty: {where}.id")
     if rule_id in seen or rule_id in _ENGINE_RULE_IDS:
         raise RulesUnusable(f"rules_rule_id_duplicate: {rule_id}")
     seen.add(rule_id)
