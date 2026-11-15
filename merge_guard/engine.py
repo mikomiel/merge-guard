@@ -310,6 +310,24 @@ def run_review(api: GitHub, policy: mg.Policy, apply: bool, event_head: str | No
         for pr in snapshot:
             if not mg.same_refs(pr, api.pull(pr["number"]), policy):
                 raise ApiError("review_snapshot_refs_changed")
+        # A head whose review verdict is a success can still be blocked by a
+        # required check that never ran. The roll-up then simply lacks the
+        # context, so the status has to name it (#14); a present-but-red run
+        # stays the checks context's signal, not this one.
+        approved = sorted({pr["head"]["sha"] for pr in snapshot
+                           if plan[pr["head"]["sha"]][0] == "success"})
+        for head in approved:
+            try:
+                missing = mg.missing_required_check(api.check_runs(head), head, policy)
+            except (mg.Unusable, ApiError) as exc:
+                # A check snapshot that cannot be read for this head is local to
+                # it: the other heads still get their status, and this one names
+                # the reason instead of aborting the whole run. ApiError covers
+                # transport failures and incomplete pagination as well.
+                plan[head] = ("pending", f"required_check_unknown: {exc}")
+                continue
+            if missing is not None:
+                plan[head] = ("pending", f"required_check_missing: {missing}")
     except (ApiError, mg.Unusable):
         if apply:
             for head in sorted(known):

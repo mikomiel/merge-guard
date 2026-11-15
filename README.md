@@ -44,7 +44,10 @@ its own pull requests; `.github/merge-guard.toml` is its policy.
    workflow's display name, and the policy placeholders.
 3. Grant them the permissions each file declares and nothing more. The gate
    status is written by `github-actions[bot]`; the `token` input cannot change
-   that identity, and a status from any other creator is refused.
+   that identity, and a status from any other creator is refused. Give your CI
+   workflow a `workflow_dispatch` trigger as well, but only if every required
+   check runs under it: a dispatch restores just the checks that workflow
+   produces ([docs/troubleshooting.md](docs/troubleshooting.md)).
 
 Read [docs/trusted-relay.md](docs/trusted-relay.md) before changing the
 triggers: the relay is what makes the writes trustworthy.
