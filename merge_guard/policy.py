@@ -314,7 +314,7 @@ def checks_green(runs: Any, statuses: Any, head: str, policy: Policy) -> tuple[b
     """Positive exact-head CI plus the trusted gate status; absence never passes.
 
     A required context with no run for this head is the named
-    ``REQUIRED_CHECK_RUN_MISSING`` refusal; a run that exists but is not
+    ``required_check_run_missing`` refusal; a run that exists but is not
     completed successfully stays ``required_check_not_success``. The gate status
     must be published by the Actions app itself (`github-actions[bot]`), which is
     the identity a workflow using the repository token gets. Only the
@@ -327,7 +327,7 @@ def checks_green(runs: Any, statuses: Any, head: str, policy: Policy) -> tuple[b
     for name in policy.required_checks:
         run = latest_runs.get((name, ACTIONS_APP_ID))
         if run is None:
-            return False, "REQUIRED_CHECK_RUN_MISSING"
+            return False, "required_check_run_missing"
         if run.get("status") != "completed" or run.get("conclusion") != "success":
             return False, "required_check_not_success"
     if any(r.get("status") != "completed" or r.get("conclusion") not in {"success", "neutral", "skipped"}

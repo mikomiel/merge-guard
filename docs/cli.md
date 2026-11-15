@@ -36,7 +36,7 @@ python3 scripts/merge_guard.py <mode> [--policy PATH] [--apply] [--json] [--vers
   `--apply` it lists what it would decide.
 - A head whose review verdict is a success is still reported `pending` with
   `required_check_missing: <name>` when a required check has no run for that
-  head; the merge then refuses `REQUIRED_CHECK_RUN_MISSING`. A run that exists
+  head; the merge then refuses `required_check_run_missing`. A run that exists
   but is red or still running stays the `checks` context's signal.
 - `--json` is accepted explicitly for scripted callers. It changes nothing:
   JSON is the only stdout format on a completed run.

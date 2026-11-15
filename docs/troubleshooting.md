@@ -9,7 +9,7 @@ protection rule is `strict`, so the pull request cannot merge, and with
 
 The gate names the condition: `review` is `pending` with the description
 `required_check_missing: <name>`, and a merge run refuses
-`REQUIRED_CHECK_RUN_MISSING`. A required check that exists but is red or still
+`required_check_run_missing`. A required check that exists but is red or still
 running keeps its own `checks` context and the `required_check_not_success`
 refusal; only a missing run produces this state.
 

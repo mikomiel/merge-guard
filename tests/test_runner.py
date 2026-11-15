@@ -131,6 +131,19 @@ def test_review_names_a_missing_required_check():
     assert fake.published == [(HEAD, "pending", "required_check_missing: checks")]
 
 
+def test_an_unusable_check_snapshot_is_named_for_that_head_only():
+    prs = [pull(1, HEAD), pull(2, OTHER)]
+    fake = Fake(prs=prs, reviews={2: [review("APPROVED", commit=OTHER)],
+                                  "default": [review()]})
+    runner.run_review(fake, policy(), apply=True, event_head=None)
+    # Fake.check_runs always answers about HEAD, so OTHER's snapshot is about a
+    # different commit: only that head is degraded, HEAD still publishes success.
+    assert sorted(fake.published) == sorted([
+        (HEAD, "success", "approved_at_head"),
+        (OTHER, "pending", "required_check_unknown: check_head_mismatch"),
+    ])
+
+
 def test_merge_refuses_a_head_with_no_required_check_run():
     class Missing(Fake):
         def check_runs(self, sha):
@@ -138,7 +151,7 @@ def test_merge_refuses_a_head_with_no_required_check_run():
 
     decisions = runner.run_merge(Missing(), policy(), apply=False)
     assert decisions[0]["eligible"] is False
-    assert decisions[0]["reason"] == "REQUIRED_CHECK_RUN_MISSING"
+    assert decisions[0]["reason"] == "required_check_run_missing"
 
 
 def test_revocation_failure_publishes_no_success():
