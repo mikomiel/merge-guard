@@ -1,0 +1,156 @@
+# The reference rule set for scripts/assurance.py.
+#
+# This is the policy the classifier was extracted with: the path rules, the
+# documentation lists and the C3 allowlists of one estate, kept as they were so
+# the classification can still be diffed against the copy it replaced. It runs
+# when no rule file is supplied. It is not the only option: a consumer with
+# another layout supplies its own file (docs/classifier-rules.md). The rule ids
+# and the section references (GT-01 §7.x) in the comments below belong to that
+# estate's policy.
+#
+# How a rule set is read: every rule is tested against every changed path, one
+# matching path is enough to make the change C1, and the result lists the id of
+# every rule that matched. The order of the rules in this file does not matter.
+
+# §7.5 bullet 1-2: the gate itself, its package, and its MCP adapter/registry.
+[[rule]]
+id = "C1-GATE-AUTHORITY"
+class = "C1"
+exact = [
+  "opencode-config/scripts/git_maintainer_gate.py",
+  "MCPs/servers/git_maintainer_gate_mcp.py",
+  "MCPs/registry.yaml",
+]
+prefixes = ["platform/scripts/git_gate/", "opencode-config/scripts/git_gate/"]
+
+# repos.yaml is treated as C1-triggering in its entirety, not only when the
+# specific authority/writable-forge/mirror/deployment/R-level/CI-applicability
+# fields change. §7.5's own preamble calls the initial classifier
+# "conservative"; field-level diff parsing (comparing old vs. new YAML content,
+# not just changed paths) is real added complexity whose only benefit is *not*
+# escalating a change that turns out to have touched only a comment.
+# Over-escalating costs a stronger assurance route; under-escalating from an
+# incorrect field-diff parse would not fail closed. The conservative choice is
+# the whole file.
+[[rule]]
+id = "C1-REPOSITORY-AUTHORITY"
+class = "C1"
+exact = ["repos.yaml"]
+
+# §7.5 bullet 4: CI trust boundary (classifier rules are already covered by
+# the git_gate/ prefix above -- git_gate/assurance.py lives there).
+[[rule]]
+id = "C1-CI-TRUST"
+class = "C1"
+# The one workflow directory, and the only CI trust surface left: since the
+# FJ-01 authority flip on 2026-08-17 the CI that judges a pull request is
+# `.forgejo/workflows/`, and FJ-06 subtracted GitHub Actions (the workflows
+# were deleted in PR #1373; the offsite copy runs none the gate can read), so
+# the `.github/workflows/` prefix would classify a directory that no longer
+# exists. Editing the Forgejo directory changes what CI trusts.
+prefixes = [".forgejo/workflows/"]
+# The repository-owned CI entrypoint (FJ-01 §7: "the repository-owned CI
+# entrypoint is a CI-trust change and therefore C1"). scripts/ci-profile is
+# the single definition CI, a terminal and the OpenCode agents all call
+# (WCI-02 3.1), and the workflows invoke it, so changing it changes what CI
+# trusts. Exact path, not a scripts/ prefix: sibling scripts are ordinary
+# repository code and keep the C2 default.
+# scripts/validation-env is *sourced by* ci-profile (it owns the cache-var
+# redirection every check runs under) and scripts/validation_lease.py gates
+# every pytest check through the suite conftest adapters. Both decide what the
+# trusted entrypoint actually does, so a change to either is a CI-trust change
+# by the same reasoning that put ci-profile here; until 2026-08-26 both took
+# the C2 default, which classified the entrypoint's own behaviour as ordinary
+# repository code. Still exact paths, not a scripts/ prefix.
+# scripts/node-install-fresh.sh is sourced by ci-profile (it decides whether
+# the opencode-config Node install is refreshed) and scripts/toolgate.py
+# decides whether a missing tool fails a check or skips it: same reasoning.
+# scripts/ci_c1_reuse.py decides whether a push to main skips its leaf jobs on
+# the strength of a pull request's full run of the same tree (2026-10-08), so
+# it decides what CI runs on main: same reasoning again.
+# scripts/ci-profile's CI_TRUST_PATHS mirrors this list (pinned by test).
+exact = [
+  "scripts/ci-profile",
+  "scripts/validation-env",
+  "scripts/validation_lease.py",
+  "scripts/node-install-fresh.sh",
+  "scripts/toolgate.py",
+  "scripts/ci_c1_reuse.py",
+]
+
+# §7.5 bullet 6 (first half): secrets, credential routing, permission policy.
+[[rule]]
+id = "C1-SECRETS-PERMISSIONS"
+class = "C1"
+exact = [
+  "platform/config/credential-routing.yaml",
+  "MCPs/servers/infisical_bootstrap.py",
+  ".claude/settings.json",
+  "harnesses/claude/settings.json",
+]
+
+# §7.5 bullet 6 (second half): firewall, ingress, egress, SSH trust,
+# Traefik, Proxmox, Sablier, storage, backup, restore -- the MCP servers
+# that directly administer this class of infrastructure. (Equivalent
+# ansible-homelab roles are already caught by C1-ANSIBLE-RUNTIME below.)
+[[rule]]
+id = "C1-NETWORK-PVE"
+class = "C1"
+exact = ["MCPs/servers/proxmox_mcp.py"]
+prefixes = ["MCPs/servers/pve_"]
+
+# §7.5 bullet 5: publication, exact-HEAD review, merge, cleanup, deployment,
+# activation, approval, broker boundaries. Publication/review/merge/cleanup
+# are already covered by the git_gate/ prefix above; this covers the
+# deployment/activation surface outside the gate package itself.
+[[rule]]
+id = "C1-DEPLOY-ACTIVATE"
+class = "C1"
+exact = [
+  "opencode-config/scripts/oc_deploy.py",
+  "platform/scripts/oc_deploy.py",
+  "opencode-config/scripts/deploy_opencode_config.py",
+]
+prefixes = [
+  "platform/scripts/deploy_chain/",
+  "opencode-config/scripts/deploy_chain/",
+]
+
+# §7.5 bullet 7: ansible-homelab, except paths proven to be tests or source
+# documentation only. A path under any prefix below is exempt when it is under
+# ansible-homelab/tests/ or ends in .md, so the tests/docs exception also covers
+# the moved harness role inputs; a single non-exempt path triggers the rule for
+# the whole change, matching "mixed changes containing any C1 trigger" (§7.5's
+# combining rule).
+[[rule]]
+id = "C1-ANSIBLE-RUNTIME"
+class = "C1"
+prefixes = [
+  "ansible-homelab/",
+  "harnesses/pi/role/",
+  "harnesses/codex/role/",
+  "harnesses/claude/role/",
+  "harnesses/deepseek/role/",
+  "harnesses/vibe/role/",
+]
+exempt_prefixes = ["ansible-homelab/tests/"]
+exempt_suffixes = [".md"]
+
+# §7.3: doc/policy text where a broad test suite adds little confidence.
+[doc_only]
+suffixes = [".md"]
+prefixes = [
+  "docs/plans/",
+  "opencode-config/openspec/",
+  "platform/openspec/",
+  "MCPs/openspec/",
+  "ansible-homelab/openspec/",
+]
+
+# GT-01 §7.5: no approved profile model-definition file or field exists yet, so
+# both lists are empty and C3 never fires with this set. That is the correct
+# initial state, not a placeholder: the module docstring of assurance.py states
+# the five conditions and why an empty allowlist can never satisfy the first.
+[model_definition]
+files = []
+fields = []
