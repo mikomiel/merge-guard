@@ -26,9 +26,14 @@ The two rules that follow from this:
   base_branch>`, `GITHUB_REF_PROTECTED` is `true`, and `GITHUB_WORKFLOW_REF`
   names the policy's workflow file at that branch.
 - **`merge` runs when the gate publishes.** `merge-guard-merge.yml` is
-  triggered by `workflow_run` on `merge-guard review`, so a fresh gate verdict
-  is followed by a merge attempt. A schedule alone leaves an approved pull
-  request blocked for up to an hour, which is how advisory-radar#37 happened.
+  triggered by `workflow_run` on `merge-guard review`, and by nothing else
+  except the hourly schedule, so one completed gate run yields one merge
+  attempt. The review workflow is itself triggered by CI and by the review
+  relay, so a finished CI run and a review that arrives after CI both still
+  reach a merge. Listing CI as a second trigger evaluated every head twice: the
+  first run always preceded the gate publication and could not see a later
+  review (#23). A schedule alone leaves an approved pull request blocked for up
+  to an hour, which is how advisory-radar#37 happened.
 
 ## The status, not the review decision
 
