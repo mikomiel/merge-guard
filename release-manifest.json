@@ -6,8 +6,8 @@
   ],
   "files": {
     "scripts/assurance.py": {
-      "sha256": "6eec690eb1f5f88d76e76cc1d1b22ff49311c95cdda242f668e823ceb23b3e69",
-      "bytes": 26059
+      "sha256": "40715695e48ce637336dc49bfa468328366a17970d965dbc706f69b82d4618af",
+      "bytes": 27987
     },
     "scripts/reference-rules.toml": {
       "sha256": "904238ab65a127ef129c85638983cb90c94d6b5cc1febc2752c9b5aa400783fd",
