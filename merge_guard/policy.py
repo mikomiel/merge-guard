@@ -274,30 +274,61 @@ def review_plan(prs: Any, policy: Policy) -> dict[str, tuple[str, str]]:
     return result
 
 
-def checks_green(runs: Any, statuses: Any, head: str, policy: Policy) -> tuple[bool, str]:
-    """Positive exact-head CI plus the trusted gate status; absence never passes.
+def latest_check_runs(runs: Any, head: str) -> dict[tuple[str, int], dict[str, Any]]:
+    """The newest check run per (name, app) for this exact head.
 
-    The gate status must be published by the Actions app itself
-    (`github-actions[bot]`), which is the identity a workflow using the
-    repository token gets. Only the default-branch workflows hold
-    `statuses: write`, and `trusted_context` pins the workflow ref.
+    A snapshot about another commit is unusable, not evidence of absence: the
+    missing-required-run state (#14) must never be inferred from a response that
+    describes a different head.
     """
-    if not isinstance(runs, list) or not isinstance(statuses, list) or not valid_sha(head):
+    if not isinstance(runs, list) or not valid_sha(head):
         raise Unusable("invalid_check_snapshot")
-    latest_runs: dict[tuple[str, int], dict[str, Any]] = {}
+    latest: dict[tuple[str, int], dict[str, Any]] = {}
     for run in runs:
         if (not isinstance(run, dict) or type(run.get("id")) is not int
                 or not isinstance(run.get("name"), str) or not run["name"]
                 or not isinstance(run.get("app"), dict) or type(run["app"].get("id")) is not int):
             raise Unusable("invalid_check_run")
         if run.get("head_sha") != head:
-            return False, "check_head_mismatch"
+            raise Unusable("check_head_mismatch")
         key = (run["name"], run["app"]["id"])
-        if key not in latest_runs or run["id"] > latest_runs[key]["id"]:
-            latest_runs[key] = run
+        if key not in latest or run["id"] > latest[key]["id"]:
+            latest[key] = run
+    return latest
+
+
+def missing_required_check(runs: Any, head: str, policy: Policy) -> str | None:
+    """The first required check with no run for this head, or None.
+
+    Absence is a different state from a failed or pending run: the remedy is
+    recovery (dispatch the workflow for the branch), not a code change (#14).
+    """
+    latest = latest_check_runs(runs, head)
+    for name in policy.required_checks:
+        if (name, ACTIONS_APP_ID) not in latest:
+            return name
+    return None
+
+
+def checks_green(runs: Any, statuses: Any, head: str, policy: Policy) -> tuple[bool, str]:
+    """Positive exact-head CI plus the trusted gate status; absence never passes.
+
+    A required context with no run for this head is the named
+    ``required_check_run_missing`` refusal; a run that exists but is not
+    completed successfully stays ``required_check_not_success``. The gate status
+    must be published by the Actions app itself (`github-actions[bot]`), which is
+    the identity a workflow using the repository token gets. Only the
+    default-branch workflows hold `statuses: write`, and `trusted_context` pins
+    the workflow ref.
+    """
+    if not isinstance(statuses, list):
+        raise Unusable("invalid_check_snapshot")
+    latest_runs = latest_check_runs(runs, head)
     for name in policy.required_checks:
         run = latest_runs.get((name, ACTIONS_APP_ID))
-        if not run or run.get("status") != "completed" or run.get("conclusion") != "success":
+        if run is None:
+            return False, "required_check_run_missing"
+        if run.get("status") != "completed" or run.get("conclusion") != "success":
             return False, "required_check_not_success"
     if any(r.get("status") != "completed" or r.get("conclusion") not in {"success", "neutral", "skipped"}
            for r in latest_runs.values()):
@@ -417,7 +448,17 @@ def merge_decision(pr: Any, reviews: Any, runs: Any, statuses: Any, comparison: 
     try:
         if not pull_scope(pr, policy) or pr["draft"]:
             return False, "pull_not_ready"
-        if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
+        if pr.get("mergeable") is not True:
+            return False, "mergeability_not_clean"
+        if pr.get("mergeable_state") == "blocked":
+            # The motivating case for #14 — a required check with no run —
+            # normally reads "blocked" here. Name that specific reason first;
+            # a blocked head never becomes eligible.
+            green, reason = checks_green(runs, statuses, pr["head"]["sha"], policy)
+            if not green:
+                return False, reason
+            return False, "mergeability_not_clean"
+        if pr.get("mergeable_state") != "clean":
             return False, "mergeability_not_clean"
         head_committed_at = _comparison_head_commit_time(comparison, pr["head"]["sha"])
         state, reason = review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"],
