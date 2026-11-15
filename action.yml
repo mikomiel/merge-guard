@@ -23,4 +23,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token || github.token }}
-      run: python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "${{ inputs.mode }}" --apply --policy "${{ inputs.policy }}"
+        # Inputs reach the script as data through the environment, never spliced into the shell source.
+        MERGE_GUARD_MODE: ${{ inputs.mode }}
+        MERGE_GUARD_POLICY: ${{ inputs.policy }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "$MERGE_GUARD_MODE" --apply --policy "$MERGE_GUARD_POLICY"

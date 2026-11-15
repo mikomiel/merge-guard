@@ -17,11 +17,16 @@ def test_action_inputs_are_pinned():
     assert set(action["inputs"]) == {"mode", "policy", "token"}
     assert action["inputs"]["mode"]["required"] is True
     assert action["inputs"]["policy"]["default"] == ".github/merge-guard.toml"
-    run = action["runs"]["steps"][-1]["run"]
+    step = action["runs"]["steps"][-1]
+    run = step["run"]
     assert "$GITHUB_ACTION_PATH/scripts/merge_guard.py" in run
-    assert "${{ inputs.mode }}" in run
     assert "--apply" in run
-    assert "${{ inputs.policy }}" in run
+    # Inputs travel through the environment: an expression spliced into the shell source is code injection.
+    assert step["env"]["MERGE_GUARD_MODE"] == "${{ inputs.mode }}"
+    assert step["env"]["MERGE_GUARD_POLICY"] == "${{ inputs.policy }}"
+    assert '"$MERGE_GUARD_MODE"' in run
+    assert '--policy "$MERGE_GUARD_POLICY"' in run
+    assert "${{" not in run
 
 
 FROZEN_SCHEMA = {
