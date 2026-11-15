@@ -71,8 +71,9 @@ The workflow authenticates with a fine-grained personal access token stored as
 `RELEASE_PLEASE_TOKEN`, with Contents and pull-request write on this repository.
 The default `GITHUB_TOKEN` cannot be used: a pull request it creates does not
 trigger the pull-request workflows, so the required checks would never run, and a
-merge it makes suppresses the `push`-triggered run, which is why the workflow
-also observes the completed `merge-guard merge` run.
+merge it makes suppresses the `push`-triggered run, which is why the merge
+workflow calls the release workflow itself when its own run landed a pull
+request.
 
 The release pull request always changes a path outside the ordinary allowlist, so
 the gate never merges it: a maintainer merges it. The release notes do not state

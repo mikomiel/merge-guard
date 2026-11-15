@@ -44,6 +44,12 @@ def _triggers(document: dict) -> dict:
     return value
 
 
+def _yaml(path: Path) -> dict:
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(value, dict)
+    return value
+
+
 def test_release_type_and_tag_shape():
     config = _json(CONFIG)
     assert config["release-type"] == "python"
@@ -78,22 +84,70 @@ def test_the_workflow_uses_the_token_that_can_trigger_checks():
     assert step["with"]["manifest-file"] == ".release-please-manifest.json"
 
 
-def test_the_workflow_observes_the_merges_that_suppress_push_events():
+def test_the_merge_workflow_calls_the_release_workflow_only_when_it_merged():
+    """`workflow_run` fires on every completion of the merge workflow, merged or not.
+
+    That workflow completes hourly and after every review pass, so observing the
+    completion cost one release run per completion rather than per merge. The
+    merge job now reports whether it landed a pull request, and the release
+    workflow is called from that result.
+    """
+    merge = _yaml(ROOT / ".github" / "workflows" / "merge-guard-merge.yml")
+    job = merge["jobs"]["merge"]
+    assert job["outputs"] == {"merged": "${{ steps.gate.outputs.merged }}"}
+    gate = next(step for step in job["steps"] if step.get("id") == "gate")
+    assert gate["with"]["mode"] == "merge"
+    release = merge["jobs"]["release"]
+    assert release["needs"] == "merge"
+    assert release["if"] == "needs.merge.outputs.merged == 'true'"
+    assert release["uses"] == "./.github/workflows/release-please.yml"
+    assert release["secrets"] == "inherit"
+    assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
+    # The called workflow must not share the caller's group: with
+    # cancel-in-progress that cancels the workflow that called it.
+    assert merge["concurrency"]["group"] == "merge-guard-merge"
+    called = _workflow()["concurrency"]
+    assert called["group"] == "release-please"
+    assert called["group"] != merge["concurrency"]["group"]
+    assert called["cancel-in-progress"] is False
+
+
+def test_the_product_dogfoods_the_default_branch_and_consumers_pin_a_release():
+    """The released tag has no `merged` output yet, so the product runs its own tree."""
+    real = _yaml(ROOT / ".github" / "workflows" / "merge-guard-merge.yml")
+    real_gate = next(step for step in real["jobs"]["merge"]["steps"] if step.get("id") == "gate")
+    assert real_gate["uses"] == "./"
+    example = _yaml(ROOT / "examples" / "merge.yml")
+    example_gate = next(step for step in example["jobs"]["merge"]["steps"] if step.get("id") == "gate")
+    owner, _, ref = example_gate["uses"].partition("@")
+    assert owner == "mikomiel/merge-guard"
+    assert ref == "0" * 40, "the example teaches a pinned release, never a branch"
+
+
+def test_the_example_teaches_the_same_release_gate():
+    example = _yaml(ROOT / "examples" / "merge.yml")
+    assert example["jobs"]["merge"]["outputs"] == {"merged": "${{ steps.gate.outputs.merged }}"}
+    release = example["jobs"]["release"]
+    assert release["needs"] == "merge"
+    assert release["if"] == "needs.merge.outputs.merged == 'true'"
+    assert release["uses"] == "./.github/workflows/release-please.yml"
+
+
+def test_the_release_workflow_is_called_or_pushed_and_never_observes_a_completion():
     triggers = _triggers(_workflow())
     assert triggers["push"] == {"branches": ["main"]}
-    assert triggers["workflow_run"]["workflows"] == ["merge-guard merge"]
-    assert triggers["workflow_run"]["types"] == ["completed"]
+    assert "workflow_call" in triggers
     assert "workflow_dispatch" in triggers
+    assert "workflow_run" not in triggers
 
 
-def test_the_workflow_pins_the_release_please_action_and_the_default_branch_guard():
-    workflow = _workflow()
-    job = workflow["jobs"]["release-please"]
+def test_the_release_job_pins_the_action_and_needs_no_branch_guard():
+    job = _workflow()["jobs"]["release-please"]
+    assert "if" not in job
     (step,) = job["steps"]
     assert step["uses"].startswith("googleapis/release-please-action@")
-    guard = job["if"]
-    assert "github.event_name != 'workflow_run'" in guard
-    assert "head_branch == 'main'" in guard
+    assert step["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
+    assert step["with"]["manifest-file"] == ".release-please-manifest.json"
 
 
 def test_the_python_updater_targets_exist_in_the_shape_it_rewrites():

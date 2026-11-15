@@ -17,7 +17,12 @@ def test_action_inputs_are_pinned():
     assert set(action["inputs"]) == {"mode", "policy", "token"}
     assert action["inputs"]["mode"]["required"] is True
     assert action["inputs"]["policy"]["default"] == ".github/merge-guard.toml"
-    step = action["runs"]["steps"][-1]
+    # One output, derived from the envelope: a consumer may gate a release on it.
+    assert set(action["outputs"]) == {"merged"}
+    assert action["outputs"]["merged"]["value"] == "${{ steps.envelope.outputs.merged }}"
+    step = next(
+        item for item in action["runs"]["steps"] if "scripts/merge_guard.py" in item.get("run", "")
+    )
     run = step["run"]
     assert "$GITHUB_ACTION_PATH/scripts/merge_guard.py" in run
     assert "--apply" in run

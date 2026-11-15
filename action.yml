@@ -12,6 +12,10 @@ inputs:
     description: Token used by `gh`. Defaults to the workflow token.
     required: false
     default: ""
+outputs:
+  merged:
+    description: "'true' only when an applied merge run landed a pull request; otherwise 'false'."
+    value: ${{ steps.envelope.outputs.merged }}
 runs:
   using: composite
   steps:
@@ -20,10 +24,24 @@ runs:
       with:
         python-version: "3.12"
     - name: merge-guard ${{ inputs.mode }}
+      id: guard
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token || github.token }}
         # Inputs reach the script as data through the environment, never spliced into the shell source.
         MERGE_GUARD_MODE: ${{ inputs.mode }}
         MERGE_GUARD_POLICY: ${{ inputs.policy }}
-      run: python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "$MERGE_GUARD_MODE" --apply --policy "$MERGE_GUARD_POLICY"
+        MERGE_GUARD_ENVELOPE: ${{ runner.temp }}/merge-guard-envelope.json
+      run: |
+        set -o pipefail
+        python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "$MERGE_GUARD_MODE" --apply --policy "$MERGE_GUARD_POLICY" \
+          | tee "$MERGE_GUARD_ENVELOPE"
+    # The envelope already says whether a merge landed. Deriving the output from it
+    # adds no CLI flag and no second source of truth for the same fact.
+    - name: Report whether this run merged a pull request
+      id: envelope
+      shell: bash
+      env:
+        MERGE_GUARD_ENVELOPE: ${{ runner.temp }}/merge-guard-envelope.json
+      run: |
+        python3 "$GITHUB_ACTION_PATH/scripts/merge_guard_envelope.py" "$MERGE_GUARD_ENVELOPE" "$GITHUB_OUTPUT"
