@@ -57,11 +57,38 @@ repository or a future service is unavailable.
 
 ## Language
 
-The engine is Python with the standard library today. Before the merge
-executor is authored here, a bounded spike compares Python and Go against the
-shared fixtures, with a threshold fixed in advance
-([#35](https://github.com/mikomiel/merge-guard/issues/35)). The result and the
-decision are recorded on this page.
+**Decision (2026-11-15): the engine stays Python with the standard library.**
+A bounded spike compared Python and Go before the merge executor is authored
+here ([#35](https://github.com/mikomiel/merge-guard/issues/35)). The threshold
+was fixed before any run, and Go had to meet all of it to be adopted.
+
+Method:
+
+- Two arms, Python 3.12 and Go 1.25, with three runs each.
+- Every task ran in a fresh coding-agent session. Both arms used the same
+  model and harness.
+- Each session saw only the written specification, the visible fixtures and
+  the program from the previous task. Held-out fixtures were scored outside
+  the session.
+- Tasks:
+  - T1: the verdict and the path classifier.
+  - T2: fail-closed normalisation of untrusted forge JSON.
+  - T3: three independent changes to the T2 program, which were a new refusal
+    code (T3a), a policy-driven approval count (T3b) and a new required forge
+    field (T3c).
+
+| Criterion (threshold) | Result |
+|---|---|
+| Zero fail-open in every run | Met by both arms: 0 in all 30 task runs; every held-out case passed |
+| Go T3 median cost at most 70% of Python on two of three changes | **Not met.** Go/Python, net of fixed session context: 1.48, 1.04, 1.56; output tokens only: 1.23, 1.03, 1.55 |
+| Review findings not higher than Python | Met on the reviewed run: one finding each, none fail-open |
+| At most one third-party dependency | Met: Go used a hand-written TOML parser or one TOML module; Python uses `tomllib` |
+| The Action runs code derivable from the pinned commit | Not tested; Go would need a build step at run time |
+
+Go was not cheaper to change, so the threshold fails on its second criterion
+whatever the others show. The review of the Python program found one crash
+on an extreme input. The program was spike code, and the engine here has its
+own tests.
 
 ## Not planned
 
