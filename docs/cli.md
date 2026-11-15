@@ -8,7 +8,9 @@ not a patch.
 
 ## The action
 
-`action.yml` takes three inputs and nothing else:
+`action.yml` takes three inputs, and publishes one output, `merged`, which is `true`
+only when an applied `merge` run landed a pull request. It is derived from the
+envelope below, so it adds no command-line flag:
 
 | Input | Required | Default | Meaning |
 | --- | --- | --- | --- |
