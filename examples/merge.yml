@@ -1,11 +1,14 @@
-# Replace before use: `CI` with your CI workflow's display name, and the
-# merge-guard ref with the release SHA.
+# Replace before use: the merge-guard ref with the release SHA.
 # .github/workflows/merge-guard-merge.yml — runs whenever the gate publishes.
+#
+# The review workflow is the only prerequisite trigger. It is itself triggered
+# by CI and by the review relay, so both paths still reach a merge attempt
+# without evaluating a head twice (issue #23).
 name: merge-guard merge
 
 on:
   workflow_run:
-    workflows: ["CI", "merge-guard review"]
+    workflows: ["merge-guard review"]
     types: [completed]
   schedule:
     - cron: "17 * * * *"
