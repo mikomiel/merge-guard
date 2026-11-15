@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A head can miss its required run, for example after a base merge (#14).
+  # Dispatching this workflow for the branch is the recovery: it starts a run
+  # on that head, so the required `checks` context exists again.
+  workflow_dispatch:
 
 permissions:
   contents: read

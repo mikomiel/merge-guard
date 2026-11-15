@@ -265,7 +265,14 @@ def test_ordinary_is_an_allowlist_and_star_cannot_cross_a_slash():
 
 def test_a_missing_required_check_blocks():
     policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
-    assert decide(policy=policy) == (False, "required_check_not_success")
+    assert decide(policy=policy) == (False, "REQUIRED_CHECK_RUN_MISSING")
+
+
+def test_a_missing_run_is_not_a_failed_run():
+    policy = make_policy()
+    assert decide(policy=policy, runs=[]) == (False, "REQUIRED_CHECK_RUN_MISSING")
+    assert decide(policy=policy, runs=[run(conclusion="failure")]) == (
+        False, "required_check_not_success")
 
 
 def test_a_skipped_required_check_blocks():

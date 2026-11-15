@@ -121,6 +121,26 @@ def test_success_is_published_only_after_revocations():
     assert fake.published == [(HEAD, "success", "approved_at_head")]
 
 
+def test_review_names_a_missing_required_check():
+    class Missing(Fake):
+        def check_runs(self, sha):
+            return []
+
+    fake = Missing()
+    runner.run_review(fake, policy(), apply=True, event_head=None)
+    assert fake.published == [(HEAD, "pending", "required_check_missing: checks")]
+
+
+def test_merge_refuses_a_head_with_no_required_check_run():
+    class Missing(Fake):
+        def check_runs(self, sha):
+            return []
+
+    decisions = runner.run_merge(Missing(), policy(), apply=False)
+    assert decisions[0]["eligible"] is False
+    assert decisions[0]["reason"] == "REQUIRED_CHECK_RUN_MISSING"
+
+
 def test_revocation_failure_publishes_no_success():
     prs = [pull(1, HEAD), pull(2, OTHER)]
     fake = Fake(prs=prs, reviews={2: [review("CHANGES_REQUESTED", commit=OTHER)],

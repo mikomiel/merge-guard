@@ -7,23 +7,35 @@ consumer's required check — commonly `checks` — for the exact head. The bran
 protection rule is `strict`, so the pull request cannot merge, and with
 `enforce_admins` on there is no manual override.
 
+The gate names the condition: `review` is `pending` with the description
+`required_check_missing: <name>`, and a merge run refuses
+`REQUIRED_CHECK_RUN_MISSING`. A required check that exists but is red or still
+running keeps its own `checks` context and the `required_check_not_success`
+refusal; only a missing run produces this state.
+
 **Cause.** `pull_request` workflows fire on `opened`, `synchronize` and
 `reopened`. In the case reported in issue #14 a base merge left the new head with
 no `checks` run while the gate's own workflow did run for it. Why GitHub did not
 dispatch a run for that head is not established from the workflows alone; what is
 established is the consequence, and that a new event fixes it.
 
-**Recovery.** Either of these makes GitHub dispatch a new event for the head, and
-both also re-run the gate so the head gets a fresh `review` status:
+**Recovery.** Either of these makes GitHub dispatch a new event for the head:
 
+- dispatch the consumer's CI workflow for the pull request branch:
+  `gh workflow run checks.yml --ref <pr-branch>`
 - close the pull request and reopen it;
 - push any commit to the branch.
 
-Prefer reopening: it leaves the branch's history untouched.
+The dispatched workflow must declare `workflow_dispatch`; this repository's
+`checks.yml` does, and a consumer adds it to its own CI workflow. A dispatch
+runs the workflow file at the ref and only works for a same-repository branch:
+GitHub does not offer it for a branch in a fork. Close/reopen is the fork-safe
+fallback.
+
+Prefer the dispatch or reopening: neither rewrites the branch's history.
 
 Re-running an older workflow run is **not** a recovery. A re-run acts on that
-run's own SHA, so it produces no evidence for the new head, and `checks.yml` here
-has no `workflow_dispatch` trigger to start one for the current head.
+run's own SHA, so it produces no evidence for the new head.
 
 ## The gate says `pending` and the review looks approved
 
@@ -43,6 +55,10 @@ worth checking:
 Request a fresh review of the current head, from a qualifying reviewer, rather
 than re-running the review workflow: re-reading the old approval cannot change
 either fact.
+
+The description `required_check_missing: <name>` is not a review verdict at all:
+the approval is at this head, but a required check has no run for it. Use the
+recovery in the section above.
 
 ## A pull request is approved, green, and still not merged
 
