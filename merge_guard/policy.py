@@ -448,7 +448,17 @@ def merge_decision(pr: Any, reviews: Any, runs: Any, statuses: Any, comparison: 
     try:
         if not pull_scope(pr, policy) or pr["draft"]:
             return False, "pull_not_ready"
-        if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
+        if pr.get("mergeable") is not True:
+            return False, "mergeability_not_clean"
+        if pr.get("mergeable_state") == "blocked":
+            # The motivating case for #14 — a required check with no run —
+            # normally reads "blocked" here. Name that specific reason first;
+            # a blocked head never becomes eligible.
+            green, reason = checks_green(runs, statuses, pr["head"]["sha"], policy)
+            if not green:
+                return False, reason
+            return False, "mergeability_not_clean"
+        if pr.get("mergeable_state") != "clean":
             return False, "mergeability_not_clean"
         head_committed_at = _comparison_head_commit_time(comparison, pr["head"]["sha"])
         state, reason = review_verdict(reviews, pr["head"]["sha"], pr["user"]["login"],

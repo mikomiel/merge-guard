@@ -98,6 +98,18 @@ def test_stale_head_check_blocks():
     assert decide(runs=[run(sha=OLD)]) == (False, "check_head_mismatch")
 
 
+def test_a_blocked_head_names_a_missing_required_run():
+    blocked = pull()
+    blocked["mergeable_state"] = "blocked"
+    assert decide(pr=blocked, runs=[]) == (False, "required_check_run_missing")
+
+
+def test_a_blocked_green_head_is_still_mergeability_not_clean():
+    blocked = pull()
+    blocked["mergeable_state"] = "blocked"
+    assert decide(pr=blocked) == (False, "mergeability_not_clean")
+
+
 def test_approval_on_an_older_head_does_not_count():
     assert decide(reviews=[review("APPROVED", commit=OLD)]) == (
         False, "current_head_approval_required")

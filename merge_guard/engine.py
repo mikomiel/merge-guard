@@ -319,10 +319,11 @@ def run_review(api: GitHub, policy: mg.Policy, apply: bool, event_head: str | No
         for head in approved:
             try:
                 missing = mg.missing_required_check(api.check_runs(head), head, policy)
-            except mg.Unusable as exc:
+            except (mg.Unusable, ApiError) as exc:
                 # A check snapshot that cannot be read for this head is local to
                 # it: the other heads still get their status, and this one names
-                # the reason instead of aborting the whole run.
+                # the reason instead of aborting the whole run. ApiError covers
+                # transport failures and incomplete pagination as well.
                 plan[head] = ("pending", f"required_check_unknown: {exc}")
                 continue
             if missing is not None:

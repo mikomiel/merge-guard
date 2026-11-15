@@ -144,6 +144,24 @@ def test_an_unusable_check_snapshot_is_named_for_that_head_only():
     ])
 
 
+def test_a_check_read_error_is_named_for_that_head_only():
+    prs = [pull(1, HEAD), pull(2, OTHER)]
+
+    class Unreadable(Fake):
+        def check_runs(self, sha):
+            if sha == OTHER:
+                raise runner.ApiError("github_check_runs_incomplete")
+            return [check()]
+
+    fake = Unreadable(prs=prs, reviews={2: [review("APPROVED", commit=OTHER)],
+                                       "default": [review()]})
+    runner.run_review(fake, policy(), apply=True, event_head=None)
+    assert sorted(fake.published) == sorted([
+        (HEAD, "success", "approved_at_head"),
+        (OTHER, "pending", "required_check_unknown: github_check_runs_incomplete"),
+    ])
+
+
 def test_merge_refuses_a_head_with_no_required_check_run():
     class Missing(Fake):
         def check_runs(self, sha):

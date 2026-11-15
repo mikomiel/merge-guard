@@ -1,8 +1,11 @@
-"""A missed required run is recoverable by dispatching the CI workflow (#14).
+"""A missed required run is recoverable by an event; a dispatch only when it can
+produce every required context (#14).
 
 The gate can name the condition and refuse the merge, but the head still has no
-run. `workflow_dispatch` on `checks.yml` is the one command that creates a run
-on the current head, so it is the documented recovery.
+run. A dispatch restores only the checks the dispatched workflow produces; this
+repository's `dependency-review` runs only on `pull_request`, so close/reopen is
+its recovery, and the dispatch stays the consumer recommendation under that
+condition.
 """
 
 from __future__ import annotations
@@ -23,11 +26,22 @@ def _triggers(path: Path) -> dict:
     return value
 
 
+def _troubleshooting() -> str:
+    text = (ROOT / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
+    return " ".join(text.split())
+
+
 def test_the_checks_workflow_can_be_dispatched_for_a_branch():
     assert "workflow_dispatch" in _triggers(
         ROOT / ".github" / "workflows" / "checks.yml")
 
 
-def test_the_documented_recovery_command_is_the_dispatch():
-    text = (ROOT / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
-    assert "gh workflow run checks.yml --ref <pr-branch>" in text
+def test_the_documented_command_is_conditioned_on_every_required_check():
+    assert "gh workflow run <ci-workflow>.yml --ref <pr-branch>" in _troubleshooting()
+
+
+def test_the_docs_limit_a_dispatch_to_the_checks_it_produces():
+    text = _troubleshooting()
+    assert "restores only the required checks that the dispatched workflow produces" in text
+    assert "dependency-review" in text
+    assert "reopening or pushing" in text

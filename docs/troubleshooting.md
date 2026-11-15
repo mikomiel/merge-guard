@@ -19,20 +19,21 @@ no `checks` run while the gate's own workflow did run for it. Why GitHub did not
 dispatch a run for that head is not established from the workflows alone; what is
 established is the consequence, and that a new event fixes it.
 
-**Recovery.** Either of these makes GitHub dispatch a new event for the head:
+**Recovery.** Close the pull request and reopen it, or push any commit to the
+branch. Either makes GitHub dispatch a new event for the head, so both required
+contexts run again; reopening leaves the branch's history untouched.
 
-- dispatch the consumer's CI workflow for the pull request branch:
-  `gh workflow run checks.yml --ref <pr-branch>`
-- close the pull request and reopen it;
-- push any commit to the branch.
+A consumer whose required checks **all** run under `workflow_dispatch` can
+recover with a command instead:
 
-The dispatched workflow must declare `workflow_dispatch`; this repository's
-`checks.yml` does, and a consumer adds it to its own CI workflow. A dispatch
-runs the workflow file at the ref and only works for a same-repository branch:
-GitHub does not offer it for a branch in a fork. Close/reopen is the fork-safe
-fallback.
+`gh workflow run <ci-workflow>.yml --ref <pr-branch>`
 
-Prefer the dispatch or reopening: neither rewrites the branch's history.
+A dispatch restores only the required checks that the dispatched workflow
+produces. In this repository that is not the full set: `dependency-review` runs
+only on `pull_request`, so a dispatch of `checks.yml` leaves it skipped and the
+gate still refuses. This repository therefore recovers by reopening or pushing.
+A dispatch also works only for a same-repository branch; close/reopen is the
+fork-safe fallback.
 
 Re-running an older workflow run is **not** a recovery. A re-run acts on that
 run's own SHA, so it produces no evidence for the new head.

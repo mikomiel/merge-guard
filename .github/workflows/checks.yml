@@ -5,8 +5,10 @@ on:
     branches: [main]
   pull_request:
   # A head can miss its required run, for example after a base merge (#14).
-  # Dispatching this workflow for the branch is the recovery: it starts a run
-  # on that head, so the required `checks` context exists again.
+  # A dispatch starts `checks` on the branch, but not `dependency-review`,
+  # which runs only on pull_request: this repository recovers with
+  # close/reopen (docs/troubleshooting.md). A consumer whose required checks
+  # all run under workflow_dispatch can use the dispatch instead.
   workflow_dispatch:
 
 permissions:
