@@ -65,6 +65,12 @@ def github_run(exchanges: Exchanges):
     """A stand-in for ``subprocess.run`` that answers ``gh api`` from the case."""
 
     def run(command, input=None, **_kwargs):
+        if command[:3] == ["gh", "api", "graphql"]:
+            fields = dict(item.split("=", 1) for item in command[3:] if "=" in item)
+            response = exchanges.answer("POST", "/graphql", {"number": int(fields["number"])})
+            ok = 200 <= response["status"] < 300
+            return subprocess.CompletedProcess(command, 0 if ok else 1,
+                                               stdout=_body_text(response), stderr="")
         assert command[:5] == ["gh", "api", "--hostname", "github.com", "--method"], command
         method, target = command[5], "/" + command[6]
         body = json.loads(input) if input is not None else None

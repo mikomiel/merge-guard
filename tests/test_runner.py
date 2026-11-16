@@ -30,11 +30,11 @@ def review(state="APPROVED", commit=HEAD):
             "user": {"id": REVIEWER_ID, "login": "reviewer[bot]", "type": "Bot"}}
 
 
-def pull(number=1, head=HEAD, mergeable=True, draft=False, state="open"):
+def pull(number=1, head=HEAD, mergeable=True, draft=False, state="open", body=None):
     return {"number": number, "state": state, "draft": draft, "mergeable": mergeable,
             "mergeable_state": "clean" if mergeable else "dirty", "changed_files": 1,
             "base": {"ref": "main", "sha": BASE, "repo": {"full_name": "o/r"}},
-            "head": {"sha": head}, "user": {"login": "author"}}
+            "head": {"sha": head}, "body": body, "user": {"login": "author"}}
 
 
 def check():
@@ -48,13 +48,18 @@ def status(state="success", description="approved_at_head", rid=1, login="github
 
 
 class Fake:
-    def __init__(self, prs=None, reviews=None, fail_state=None, permission=None):
+    def __init__(self, prs=None, reviews=None, fail_state=None, permission=None,
+                 issues=None, close_fails=False, closing=None):
         self.prs = prs or [pull()]
         self.reviews_by = reviews or {}
         self.fail_state = fail_state
         self.permission = permission or {"user": {"id": 99}, "permission": "write"}
         self.published = []
         self.merged = []
+        self.issues = issues if issues is not None else {}
+        self.close_fails = close_fails
+        self.closed = []
+        self.closing = closing if closing is not None else []
 
     def pulls(self):
         return [{"number": pr["number"], "head": {"sha": pr["head"]["sha"]}} for pr in self.prs]
@@ -86,6 +91,11 @@ class Fake:
     def request(self, path, method="GET", body=None):
         if path.startswith("collaborators/"):
             return self.permission
+        if path.startswith("issues/"):
+            number = int(path.split("/")[1])
+            if number not in self.issues:
+                raise runner.ApiError("issue_unreadable")
+            return self.issues[number]
         raise AssertionError(path)
 
     def publish(self, sha, state, description):
@@ -95,6 +105,15 @@ class Fake:
 
     def merge(self, number, sha):
         self.merged.append((number, sha))
+
+    def closing_issues(self, number):
+        return list(self.closing)
+
+    def close_issue(self, number):
+        if self.close_fails:
+            raise runner.ApiError("issue_close_unproven")
+        self.closed.append(number)
+        self.issues[number]["state"] = "closed"
 
 
 def test_merge_re_reads_each_pull_before_deciding():

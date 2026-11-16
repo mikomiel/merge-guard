@@ -607,3 +607,17 @@ class Forgejo:
         created = self._send("POST", self._repo(f"issues/{number}/comments"), {"body": body})[1]
         if not isinstance(created, dict) or type(created.get("id")) is not int:
             raise ApiError("comment_not_confirmed")
+
+    def close_issue(self, number: int) -> None:
+        """Close one issue; Forgejo answers with the issue it closed."""
+        if not self.apply or type(number) is not int or number < 1:
+            raise ApiError("issue_close_refused")
+        closed = self._send("PATCH", self._repo(f"issues/{number}"), {"state": "closed"})[1]
+        if not isinstance(closed, dict) or closed.get("state") != "closed":
+            raise ApiError("issue_close_unproven")
+
+    def closing_issues(self, number: int) -> list[int]:
+        """Forgejo serves no closing-reference list: the engine closes nothing here."""
+        if type(number) is not int or number < 1:
+            raise ApiError("pull_number_unusable")
+        return []

@@ -15,6 +15,9 @@ from . import policy as mg
 from .forge import ApiError
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+#: One page only. A longer list is refused rather than followed: every page is
+#: another transport timeout, and cleanup must leave the job time to report a merge.
+MAX_CLOSING_PAGES = 1
 MAX_PAGES = 10
 BOT_CREATOR = ("github-actions[bot]", "Bot")
 
@@ -171,3 +174,97 @@ class GitHub:
         created = self.request(f"issues/{number}/comments", "POST", {"body": body})
         if not isinstance(created, dict) or type(created.get("id")) is not int:
             raise ApiError("comment_not_confirmed")
+
+    def close_issue(self, number: int) -> None:
+        """Close one issue.
+
+        GitHub closes a pull request's linked issues itself once the merging
+        identity holds ``issues: write``; this is the engine's repeat of that
+        close for anything GitHub left open.
+        """
+        if not self.apply or type(number) is not int or number < 1:
+            raise ApiError("issue_close_refused")
+        closed = self.request(f"issues/{number}", "PATCH", {"state": "closed"})
+        if not isinstance(closed, dict) or closed.get("state") != "closed":
+            raise ApiError("issue_close_unproven")
+
+    def closing_issues(self, number: int) -> list[int]:
+        """GitHub's own answer to "which issues does this pull request close?".
+
+        ``closingIssuesReferences`` is parsed by GitHub itself, so a reference
+        hidden in code, an HTML comment or a link title is GitHub's problem, and
+        its list is authoritative. GitHub also skips its own auto-close when the
+        merging identity lacks ``issues: write``, which is why the engine repeats
+        the close from this list instead of guessing from the body.
+
+        The list is paginated and bounded: a pull request that names more
+        references than the bound allows is refused as an incomplete read rather
+        than closed from a partial list.
+        """
+        if type(number) is not int or number < 1:
+            raise ApiError("pull_number_unusable")
+        owner, _, name = self.policy.repository.partition("/")
+        if not owner or not name:
+            raise ApiError("repository_unusable")
+        numbers: list[int] = []
+        cursor: str | None = None
+        for _ in range(MAX_CLOSING_PAGES):
+            references = self._closing_page(owner, name, number, cursor)
+            nodes = references.get("nodes")
+            if not isinstance(nodes, list):
+                raise ApiError("closing_issues_unusable")
+            for node in nodes:
+                value = node.get("number") if isinstance(node, dict) else None
+                repository = node.get("repository") if isinstance(node, dict) else None
+                owner_name = repository.get("nameWithOwner") if isinstance(repository, dict) else None
+                if type(value) is not int or value < 1 or not isinstance(owner_name, str) or not owner_name:
+                    raise ApiError("closing_issues_unusable")
+                if owner_name != self.policy.repository:
+                    # Another repository's issue: its number means nothing here, and
+                    # closing this repository's issue of the same number would be a lie.
+                    continue
+                numbers.append(value)
+            info = references.get("pageInfo")
+            more = info.get("hasNextPage") if isinstance(info, dict) else None
+            if more is False:
+                return numbers
+            next_cursor = info.get("endCursor") if isinstance(info, dict) else None
+            if more is not True or not isinstance(next_cursor, str) or not next_cursor:
+                raise ApiError("closing_issues_unusable")
+            cursor = next_cursor
+        raise ApiError("closing_issues_incomplete")
+
+    def _closing_page(self, owner: str, name: str, number: int,
+                      cursor: str | None) -> dict[str, Any]:
+        """One page of ``closingIssuesReferences``, as GitHub answers it."""
+        query = ("query($owner:String!,$name:String!,$number:Int!,$after:String){"
+                 "repository(owner:$owner,name:$name){pullRequest(number:$number){"
+                 "closingIssuesReferences(first:50,after:$after){"
+                 "pageInfo{hasNextPage endCursor}"
+                 "nodes{number repository{nameWithOwner}}}}}}")
+        command = ["gh", "api", "graphql", "--hostname", "github.com",
+                   "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={name}",
+                   "-F", f"number={number}"]
+        if cursor is not None:
+            command += ["-f", f"after={cursor}"]
+        try:
+            completed = subprocess.run(command, text=True, capture_output=True,
+                                       timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ApiError("closing_issues_unreadable") from exc
+        if completed.returncode != 0 or len(completed.stdout.encode()) > MAX_RESPONSE_BYTES:
+            raise ApiError("closing_issues_unreadable")
+        try:
+            payload = json.loads(completed.stdout)
+        except (ValueError, RecursionError) as exc:
+            # ValueError covers a decode error and an integer past Python's digit
+            # limit; RecursionError a body nested past the recursion limit.
+            raise ApiError("closing_issues_unreadable") from exc
+        data = payload.get("data") if isinstance(payload, dict) else None
+        repository = data.get("repository") if isinstance(data, dict) else None
+        pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+        references = pull.get("closingIssuesReferences") if isinstance(pull, dict) else None
+        if not isinstance(references, dict):
+            # A missing structure is a broken read, not "this merge closes nothing".
+            raise ApiError("closing_issues_unusable")
+        return references
