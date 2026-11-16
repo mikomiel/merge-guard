@@ -24,6 +24,8 @@ jobs:
           # checks run on the head, not on checkout's synthetic pull-request
           # merge commit.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The release-pin test resolves a tag, so the tags must be present.
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.12"

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -180,3 +182,53 @@ def test_the_release_metadata_stays_outside_the_ordinary_allowlist():
         ".release-please-manifest.json",
     ):
         assert not any(fnmatch.fnmatch(path, pattern) for pattern in ordinary), path
+
+
+_REPO_GIT_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+)
+
+
+def _own_pins(workflows: Path) -> list[tuple[str, str]]:
+    """Every step in *workflows* that uses this action, as (file name, uses)."""
+    pins = []
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        for job in (_yaml(path).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                if str(step.get("uses", "")).startswith("mikomiel/merge-guard@"):
+                    pins.append((path.name, step["uses"]))
+    return pins
+
+
+def test_a_second_pin_under_either_workflow_suffix_is_found(tmp_path):
+    step = "jobs:\n  j:\n    steps:\n      - uses: mikomiel/merge-guard@" + "0" * 40 + "\n"
+    (tmp_path / "a.yml").write_text(step, encoding="utf-8")
+    (tmp_path / "b.yaml").write_text(step, encoding="utf-8")
+    assert [name for name, _ in _own_pins(tmp_path)] == ["a.yml", "b.yaml"]
+
+
+def test_the_repository_pins_its_own_release_in_one_place_and_the_tag_names_it():
+    """The review workflow holds the only real pin, and its comment tag resolves to it."""
+    workflows = ROOT / ".github" / "workflows"
+    pins = _own_pins(workflows)
+    assert [name for name, _ in pins] == ["merge-guard-review.yml"], pins
+    ref = pins[0][1].partition("@")[2]
+    assert re.fullmatch(r"[0-9a-f]{40}", ref), ref
+    text = (workflows / pins[0][0]).read_text(encoding="utf-8")
+    (line,) = [line for line in text.splitlines() if "mikomiel/merge-guard@" in line]
+    comment = line.partition("#")[2].split()
+    assert comment, "the pin line must carry its release tag in a trailing comment"
+    tag = comment[0].rstrip(":")
+    env = {k: v for k, v in os.environ.items() if k not in _REPO_GIT_ENV}
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
+        cwd=ROOT, env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, f"tag {tag} is not in this clone: run `git fetch --tags`"
+    assert result.stdout.strip() == ref, f"the pin {ref} is not the commit of {tag}"
