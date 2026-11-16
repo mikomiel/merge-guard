@@ -57,6 +57,8 @@ def test_release_type_and_tag_shape():
     assert config["release-type"] == "python"
     assert config["include-v-in-tag"] is True
     assert config["include-component-in-tag"] is False
+    # Before 1.0.0 a breaking change raises the minor version, not the major one.
+    assert config["bump-minor-pre-major"] is True
     assert list(config["packages"]) == ["."]
     assert config["packages"]["."]["package-name"] == "merge-guard"
 
