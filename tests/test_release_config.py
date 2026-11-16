@@ -195,15 +195,28 @@ _REPO_GIT_ENV = (
 )
 
 
-def test_the_repository_pins_its_own_release_in_one_place_and_the_tag_names_it():
-    """The review workflow holds the only real pin, and its comment tag resolves to it."""
-    workflows = ROOT / ".github" / "workflows"
+def _own_pins(workflows: Path) -> list[tuple[str, str]]:
+    """Every step in *workflows* that uses this action, as (file name, uses)."""
     pins = []
-    for path in sorted(workflows.glob("*.yml")):
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
         for job in (_yaml(path).get("jobs") or {}).values():
             for step in job.get("steps") or []:
                 if str(step.get("uses", "")).startswith("mikomiel/merge-guard@"):
                     pins.append((path.name, step["uses"]))
+    return pins
+
+
+def test_a_second_pin_under_either_workflow_suffix_is_found(tmp_path):
+    step = "jobs:\n  j:\n    steps:\n      - uses: mikomiel/merge-guard@" + "0" * 40 + "\n"
+    (tmp_path / "a.yml").write_text(step, encoding="utf-8")
+    (tmp_path / "b.yaml").write_text(step, encoding="utf-8")
+    assert [name for name, _ in _own_pins(tmp_path)] == ["a.yml", "b.yaml"]
+
+
+def test_the_repository_pins_its_own_release_in_one_place_and_the_tag_names_it():
+    """The review workflow holds the only real pin, and its comment tag resolves to it."""
+    workflows = ROOT / ".github" / "workflows"
+    pins = _own_pins(workflows)
     assert [name for name, _ in pins] == ["merge-guard-review.yml"], pins
     ref = pins[0][1].partition("@")[2]
     assert re.fullmatch(r"[0-9a-f]{40}", ref), ref
