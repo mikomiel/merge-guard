@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/mikomiel/merge-guard/compare/v0.1.0...v0.2.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **forge:** a CLI run whose policy names no forge now exits 2 with policy_forge_missing; add repository.forge = "github" or pass --forge.
+
+### Features
+
+* **action:** publish whether a merge run landed a pull request ([#44](https://github.com/mikomiel/merge-guard/issues/44)) ([f9cf588](https://github.com/mikomiel/merge-guard/commit/f9cf58894bfcf417a39af5fd88b1ff349072d9b5)), closes [#43](https://github.com/mikomiel/merge-guard/issues/43)
+* **classifier:** read the rules from a validated data file ([#11](https://github.com/mikomiel/merge-guard/issues/11)) ([#40](https://github.com/mikomiel/merge-guard/issues/40)) ([1b1a5d1](https://github.com/mikomiel/merge-guard/commit/1b1a5d1ee8d62dde02902033860d6d31c639ddc5))
+* **forge:** put the forge behind one port with GitHub and Forgejo adapters ([#34](https://github.com/mikomiel/merge-guard/issues/34)) ([#47](https://github.com/mikomiel/merge-guard/issues/47)) ([71647ea](https://github.com/mikomiel/merge-guard/commit/71647ea18867baba7638ce195f339aa005f490d3))
+
+
+### Bug Fixes
+
+* **action:** pass inputs through the environment, not the shell source ([#42](https://github.com/mikomiel/merge-guard/issues/42)) ([3c863f1](https://github.com/mikomiel/merge-guard/commit/3c863f161db13cf91e8135279ce175a37f175444))
+* name a required check that has no run ([#14](https://github.com/mikomiel/merge-guard/issues/14)) ([#39](https://github.com/mikomiel/merge-guard/issues/39)) ([d623857](https://github.com/mikomiel/merge-guard/commit/d623857b0fe6be5d312f97560c0eac98c0d0880d))
+
 ## [0.1.0](https://github.com/mikomiel/merge-guard/compare/v0.0.2...v0.1.0) (2026-11-14)
 
 
