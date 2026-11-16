@@ -84,13 +84,13 @@ what the mechanism does with any rule set:
   pinned test suite green (``git_gate/README.md``'s verification method) --
   not by a fifth algorithmic condition here.
 
-**Extraction provenance.** The rule identifiers, the section references and
-the path data in ``reference-rules.toml`` are the policy of the estate this
-module was extracted from, not a general default: they are the reference set,
-kept so the classification can still be diffed against the copy it replaced,
-and a consumer with another layout supplies its own file instead. The module
-was moved here with its behaviour unchanged, and the path data was moved out of
-it into that file without changing a result.
+**Extraction provenance.** The rule identifiers and the path data in
+``reference-rules.toml`` are the policy of the estate this module was extracted
+from, not a general default: they are the reference set, kept so the
+classification can still be diffed against the copy it replaced, and a consumer
+with another layout supplies its own file instead. The module was moved here
+with its behaviour unchanged, and the path data was moved out of it into that
+file without changing a result.
 """
 
 from __future__ import annotations
@@ -198,39 +198,75 @@ def _entries(value: Any, where: str, *, anchored: bool) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _has_control_character(text: str) -> bool:
+    """Whether *text* holds a character that could end an output line early.
+
+    A rule id is the first column of every row the command line prints, the
+    refusal for a duplicate id names it, and a refusal can name a key or the path
+    of the file. A tab would shift the columns, and a newline, a carriage return
+    or any other control character (Unicode category ``Cc``), or U+2028 or
+    U+2029, which line-splitting readers also break on, would start what reads as
+    another row or another refusal.
+    """
+
+    return any(unicodedata.category(char) == "Cc" or char in "\u2028\u2029" for char in text)
+
+
+def _refusal_text(value: Any) -> str:
+    """*value* as a refusal may print it: as written if it is plain text, else escaped.
+
+    A refusal echoes what a caller chose: a key of the rule file, or the path of
+    the file. A quoted TOML key, or one command-line argument, can hold a line
+    break or another control character, which would split the refusal line or
+    forge a second one. A table passed in process can hold a key that is not a
+    string at all. Either is printed as ``ascii(str(value))``: one line of
+    printable ASCII.
+    """
+
+    if isinstance(value, str) and not _has_control_character(value):
+        return value
+    try:
+        text = str(value)
+    except Exception:  # noqa: BLE001 - any failure to render must still refuse
+        return f"<{type(value).__name__}>"
+    return ascii(text)
+
+
+def _invisible_at_an_end(text: str) -> bool:
+    """Whether *text* starts or ends with whitespace or a format character (``Cf``)."""
+
+    return any(
+        char.isspace() or unicodedata.category(char) == "Cf" for char in (text[0], text[-1])
+    )
+
+
 def _unknown_fields(data: dict[str, Any]) -> list[str]:
     """Fields the format does not accept, as dotted paths.
 
     A section of the wrong type is left to :func:`validate_rules`, which reports
-    it as ``rules_wrong_type``; this only reports the fields nothing reads.
+    it as ``rules_wrong_type``; this only reports the fields nothing reads. Each
+    key is printed through :func:`_refusal_text`.
     """
 
-    found = [key for key in data if key not in RULE_FILE_FIELDS]
+    found = [_refusal_text(key) for key in data if key not in RULE_FILE_FIELDS]
     for section in ("doc_only", "model_definition"):
         table = data.get(section)
         if isinstance(table, dict):
-            found += [f"{section}.{key}" for key in table if key not in RULE_FILE_FIELDS[section]]
+            found += [
+                f"{section}.{_refusal_text(key)}"
+                for key in table
+                if key not in RULE_FILE_FIELDS[section]
+            ]
     rules = data.get("rule")
     if isinstance(rules, list):
         for index, item in enumerate(rules):
             if isinstance(item, dict):
                 found += [
-                    f"rule[{index}].{key}" for key in item if key not in RULE_FILE_FIELDS["rule"]
+                    f"rule[{index}].{_refusal_text(key)}"
+                    for key in item
+                    if key not in RULE_FILE_FIELDS["rule"]
                 ]
     return found
-
-
-def _has_control_character(text: str) -> bool:
-    """Whether *text* holds a character that could end an output line early.
-
-    A rule id is the first column of every row the command line prints, and the
-    refusal for a duplicate id names it. A tab would shift the columns, and a
-    newline, a carriage return or any other control character (Unicode category
-    ``Cc``), or U+2028 or U+2029, which line-splitting readers also break on,
-    would start what reads as another row.
-    """
-
-    return any(unicodedata.category(char) == "Cc" or char in "\u2028\u2029" for char in text)
 
 
 def _path_rule(index: int, item: Any, seen: set[str]) -> PathRule:
@@ -249,6 +285,13 @@ def _path_rule(index: int, item: Any, seen: set[str]) -> PathRule:
         raise RulesUnusable(f"rules_rule_id_invalid: {where}.id")
     if not rule_id.strip():
         raise RulesUnusable(f"rules_rule_id_empty: {where}.id")
+    if _invisible_at_an_end(rule_id):
+        # Padding does not show in a row: ``AUTH`` and ``AUTH `` would read as one id,
+        # and ``DEFAULT-C2 `` as the engine's own. The same holds for an invisible
+        # format character (Unicode category ``Cf``, such as a zero-width space) at
+        # either end. Spaces inside an id are fine. The detail names the field,
+        # never the id, as for a control character.
+        raise RulesUnusable(f"rules_rule_id_invalid: {where}.id")
     if rule_id in seen or rule_id in _ENGINE_RULE_IDS:
         raise RulesUnusable(f"rules_rule_id_duplicate: {rule_id}")
     seen.add(rule_id)
@@ -305,17 +348,26 @@ def validate_rules(data: Any) -> Rules:
 def load_rules(path: str | os.PathLike[str]) -> Rules:
     """Read and validate a TOML rule file; raises :class:`RulesUnusable`."""
 
+    # Each refusal below names the file. The path is text the caller chose, and one
+    # command-line argument can hold a line break, so it is printed through
+    # _refusal_text, as a key is. A Path is converted first: anything that is not
+    # a str would be quoted.
+    shown = _refusal_text(str(path))
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise RulesUnusable(f"rules_unreadable: {path}: {type(exc).__name__}") from exc
+    except (OSError, ValueError) as exc:
+        # A file that is not UTF-8 text raises UnicodeDecodeError, and a NUL in the
+        # path raises a plain ValueError from open(). Both are ValueError, not OSError.
+        raise RulesUnusable(f"rules_unreadable: {shown}: {type(exc).__name__}") from exc
     try:
         data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise RulesUnusable(f"rules_not_toml: {path}: {exc}") from exc
+    except ValueError as exc:
+        # TOMLDecodeError is a ValueError. So is what int() raises for an integer
+        # literal over the interpreter's digit limit, which tomllib lets through.
+        raise RulesUnusable(f"rules_not_toml: {shown}: {exc}") from exc
     except RecursionError as exc:
         # Nesting deeper than the parser can follow is not a usable rule file.
-        raise RulesUnusable(f"rules_not_toml: {path}: nesting too deep") from exc
+        raise RulesUnusable(f"rules_not_toml: {shown}: nesting too deep") from exc
     return validate_rules(data)
 
 

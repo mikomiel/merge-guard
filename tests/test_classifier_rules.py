@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import unicodedata
 from pathlib import Path
 
@@ -27,6 +28,23 @@ SCRIPT = ROOT / "scripts" / "assurance.py"
 EXAMPLE = ROOT / "examples" / "classifier-rules.toml"
 DOCUMENT = ROOT / "docs" / "classifier-rules.md"
 ENGINE_IDS = ("C1-UNKNOWN-CONTRADICTORY", "C3-MODEL-DEFINITION-ONLY", "DEFAULT-C2")
+
+#: How many digits of an integer literal the interpreter converts by default. A longer
+#: one is a plain ``ValueError`` out of ``tomllib``, not its own ``TOMLDecodeError``.
+INTEGER_DIGIT_LIMIT = sys.int_info.default_max_str_digits
+
+#: A rule file that is nothing but one integer literal over that limit.
+OVER_LONG_INTEGER = "x = " + "9" * (INTEGER_DIGIT_LIMIT + 1) + "\n"
+
+
+@pytest.fixture(autouse=True)
+def _default_integer_digit_limit():
+    """Run each test under the default limit, so ``OVER_LONG_INTEGER`` is over it in
+    process too. ``PYTHONINTMAXSTRDIGITS`` can lift it; a ``-I`` subprocess ignores that."""
+    before = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(INTEGER_DIGIT_LIMIT)
+    yield
+    sys.set_int_max_str_digits(before)
 
 
 def _valid() -> dict:
@@ -65,7 +83,8 @@ def _with_id(rule_id: str) -> dict:
 
 
 #: Characters an id may not hold, as a (label, character) pair: each would end the
-#: row, or the line, that the id is printed on.
+#: row, or the line, that the id is printed on. A refusal does not print one raw in a
+#: key or in the path of the file either.
 CONTROL_CHARACTERS = [
     ("a tab", "\t"),
     ("a newline", "\n"),
@@ -82,8 +101,21 @@ CONTROL_CHARACTERS = [
     ("a paragraph separator", "\u2029"),
 ]
 
+#: The line breaks among them, for the tests that run a process for each one.
+LINE_BREAKS = [case for case in CONTROL_CHARACTERS if case[1] in "\n\r\u2028\u2029"]
+
 
 #: (label, data, stable reason, a fragment the detail must contain)
+class _Unprintable:
+    """A key that an in-process caller can pass and that cannot be turned into text."""
+
+    def __hash__(self) -> int:
+        return 0
+
+    def __str__(self) -> str:
+        raise RuntimeError("no text")
+
+
 REFUSALS = [
     ("top level is not a table", lambda: ["rule"], "rules_wrong_type", "(top level)"),
     ("unknown section", lambda: _with(extras={}), "rules_unknown_field", "extras"),
@@ -95,6 +127,26 @@ REFUSALS = [
      "rules_unknown_field", "model_definition.file"),
     ("every unknown field is listed", lambda: _with(zeta=1, alpha=2),
      "rules_unknown_field", "alpha, zeta"),
+    # A key that is not plain text is listed as ascii(str(key)), so a refusal stays one line.
+    ("a key with a line break is listed escaped", lambda: _with(**{"a\nb": 1}),
+     "rules_unknown_field", r"'a\nb'"),
+    ("a doc_only key with a tab is listed escaped", lambda: _with(doc_only={"a\tb": []}),
+     "rules_unknown_field", r"doc_only.'a\tb'"),
+    ("a model_definition key with a carriage return is listed escaped",
+     lambda: _with(model_definition={"a\rb": []}), "rules_unknown_field", r"model_definition.'a\rb'"),
+    ("a rule key with a line separator is listed escaped",
+     lambda: _with_rule(**{"a\u2028b": 1}), "rules_unknown_field", r"rule[0].'a\u2028b'"),
+    ("a plain key that is not ASCII is listed as written", lambda: _with(règle=1),
+     "rules_unknown_field", "règle"),
+    ("a key that is not a string", lambda: {**_valid(), 7: 1},
+     "rules_unknown_field", "'7'"),
+    ("a key that is not a string beside a string one", lambda: {**_valid(), 7: 1, "zeta": 2},
+     "rules_unknown_field", "'7', zeta"),
+    ("a doc_only key that is not a string", lambda: _with(doc_only={7: []}),
+     "rules_unknown_field", "doc_only.'7'"),
+    ("a rule key that is not a string",
+     lambda: _with(rule=[{"id": "ONE", "class": "C1", "exact": ["a.txt"], 7: 1}]),
+     "rules_unknown_field", "rule[0].'7'"),
     ("rule section absent", lambda: _without("rule"), "rules_missing_section", "rule"),
     ("doc_only section absent", lambda: _without("doc_only"), "rules_missing_section", "doc_only"),
     ("model_definition section absent", lambda: _without("model_definition"),
@@ -133,6 +185,21 @@ REFUSALS = [
          "rules_rule_id_invalid", "rule[0].id")
         for label, char in CONTROL_CHARACTERS
     ],
+    ("id has leading whitespace", lambda: _with_id(" ONE"), "rules_rule_id_invalid", "rule[0].id"),
+    ("id has trailing whitespace", lambda: _with_id("ONE "), "rules_rule_id_invalid", "rule[0].id"),
+    ("id is padded on both sides", lambda: _with_id(" ONE "), "rules_rule_id_invalid", "rule[0].id"),
+    ("id is the engine id with padding", lambda: _two_rules("ONE", "DEFAULT-C2 "),
+     "rules_rule_id_invalid", "rule[1].id"),
+    ("id repeats an earlier id with padding", lambda: _two_rules("AUTH", "AUTH "),
+     "rules_rule_id_invalid", "rule[1].id"),
+    ("id ends with a zero-width space", lambda: _two_rules("AUTH", "AUTH\u200b"),
+     "rules_rule_id_invalid", "rule[1].id"),
+    ("id starts with a byte order mark", lambda: _with_id("\ufeffONE"),
+     "rules_rule_id_invalid", "rule[0].id"),
+    ("id is the engine id with a word joiner", lambda: _two_rules("ONE", "DEFAULT-C2\u2060"),
+     "rules_rule_id_invalid", "rule[1].id"),
+    ("a key whose text cannot be rendered", lambda: {**_with(), _Unprintable(): 1},
+     "rules_unknown_field", "<_Unprintable>"),
     ("id repeats", lambda: _two_rules("ONE", "ONE"), "rules_rule_id_duplicate", "ONE"),
     *[
         (f"id reuses the engine id {engine_id}", lambda engine_id=engine_id: _two_rules("ONE", engine_id),
@@ -227,6 +294,40 @@ def test_a_missing_or_unreadable_file_is_refused(tmp_path):
         assurance.load_rules(tmp_path)
 
 
+def test_a_path_with_a_nul_is_refused_as_unreadable():
+    """``open`` raises ``ValueError``, not ``OSError``, for a NUL in the path. A command
+    line cannot carry one, so only a caller in process can. The refusal writes the path
+    as ``ascii(path)``, as it does for any path that holds a control character."""
+    path = "rules\0.toml"
+    with pytest.raises(assurance.RulesUnusable) as caught:
+        assurance.load_rules(path)
+    assert str(caught.value) == f"rules_unreadable: {path!a}: ValueError"
+
+
+@pytest.mark.parametrize(
+    ("label", "char"), CONTROL_CHARACTERS, ids=[case[0] for case in CONTROL_CHARACTERS]
+)
+def test_a_path_with_a_control_character_is_written_escaped_in_the_refusal(label, char):
+    """The refusal names the file, and its path is text the caller chose: a command-line
+    argument can hold a line break. It is written as ``ascii(path)``, as a key is, so the
+    refusal stays one line."""
+    path = f"rules{char}.toml"
+    with pytest.raises(assurance.RulesUnusable) as caught:
+        assurance.load_rules(path)
+    message = str(caught.value)
+    assert message.startswith(f"rules_unreadable: {path!a}: "), message
+    assert len(message.splitlines()) == 1, message
+
+
+@pytest.mark.parametrize("path", ["règles.toml", "規則.toml", "my rules.toml", "it's.toml"])
+def test_a_path_without_a_control_character_is_written_as_given_in_the_refusal(path):
+    """Only a control character is escaped: a path that is not ASCII, or holds a space or a
+    quote, names the file as the caller wrote it."""
+    with pytest.raises(assurance.RulesUnusable) as caught:
+        assurance.load_rules(path)
+    assert str(caught.value) == f"rules_unreadable: {path}: FileNotFoundError"
+
+
 def test_a_file_that_is_not_utf8_is_refused(tmp_path):
     path = tmp_path / "rules.toml"
     path.write_bytes(b"\xff\xfe[[rule]]\n")
@@ -261,6 +362,29 @@ def test_the_cli_refuses_a_rule_file_nested_too_deep(tmp_path):
     assert done.returncode == 2
     assert done.stdout == ""
     assert done.stderr == f"merge_guard_refused: rules_not_toml: {path}: nesting too deep\n"
+
+
+def test_an_integer_over_the_digit_limit_is_refused_as_not_toml(tmp_path):
+    """The parser lets the interpreter's plain ``ValueError`` out for it, and a rule file
+    the parser cannot read is not TOML to this module either."""
+    path = tmp_path / "rules.toml"
+    path.write_text(OVER_LONG_INTEGER, encoding="utf-8")
+    with pytest.raises(assurance.RulesUnusable) as caught:
+        assurance.load_rules(path)
+    # The wording after the path is CPython's, which differs between versions.
+    assert str(caught.value).startswith(f"rules_not_toml: {path}: ")
+    assert len(str(caught.value).splitlines()) == 1
+
+
+def test_the_cli_refuses_a_rule_file_with_an_integer_over_the_digit_limit(tmp_path):
+    path = tmp_path / "rules.toml"
+    path.write_text(OVER_LONG_INTEGER, encoding="utf-8")
+    done = _run_script(tmp_path, "README.md\n", "--rules", str(path))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr.startswith(f"merge_guard_refused: rules_not_toml: {path}: ")
+    assert len(done.stderr.splitlines()) == 1, done.stderr
+    assert "Traceback" not in done.stderr
 
 
 def test_a_repeated_toml_key_is_refused_by_the_parser(tmp_path):
@@ -308,6 +432,18 @@ def _id_file(directory: Path, spelled: str) -> Path:
     return path
 
 
+def _key_file(directory: Path, spelled: str) -> Path:
+    """A rule file that opens with a top-level key it does not accept, *spelled* as TOML
+    source between quotes, and is otherwise usable."""
+    path = directory / "rules.toml"
+    path.write_text(
+        f'"{spelled}" = 1\n[[rule]]\nid = "ONE"\nclass = "C1"\nexact = ["a.txt"]\n'
+        "[doc_only]\n[model_definition]\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 @pytest.mark.parametrize(
     ("label", "spelled"), CONTROL_IDS_IN_TOML, ids=[case[0] for case in CONTROL_IDS_IN_TOML]
 )
@@ -331,11 +467,27 @@ def test_every_control_character_is_refused_in_an_id():
 
 
 @pytest.mark.parametrize(
-    "rule_id", ["ONE", "C1-GATE-AUTHORITY", "two words", "règle-ß", "規則"]
+    "rule_id",
+    ["ONE", "C1-GATE-AUTHORITY", "two words", "two  spaces", "a\u3000b", "règle-ß", "規則"],
 )
-def test_an_id_without_a_control_character_is_accepted(rule_id):
+def test_an_id_without_a_control_character_or_padding_is_accepted(rule_id):
     rules = assurance.validate_rules(_with_id(rule_id))
     assert [rule.rule_id for rule in rules.path_rules] == [rule_id]
+
+
+@pytest.mark.parametrize(
+    "rule_id", [" ONE", "ONE ", " ONE ", "  ONE", "ONE\xa0", "\u3000ONE", "ONE\u2003"]
+)
+def test_an_id_with_leading_or_trailing_whitespace_is_refused(rule_id):
+    """Padding does not show in a row, so ``AUTH`` and ``AUTH `` would read as one id.
+    The detail names the field, not the id, as it does for a control character."""
+    assert _refusal(_with_id(rule_id)) == "rules_rule_id_invalid: rule[0].id"
+
+
+@pytest.mark.parametrize("rule_id", [" ", "   ", "\xa0", "\u3000 "])
+def test_an_id_of_only_whitespace_is_empty_not_padded(rule_id):
+    """Blankness is checked before padding, so a blank id keeps the reason it always had."""
+    assert _refusal(_with_id(rule_id)) == "rules_rule_id_empty: rule[0].id"
 
 
 # The reference set and the worked example.
@@ -397,6 +549,7 @@ BROKEN_REFERENCES = [
     ("a directory", "directory", r"rules_unreadable: {path}: IsADirectoryError"),
     ("not UTF-8", b"\xff\xfe[[rule]]\n", r"rules_unreadable: {path}: UnicodeDecodeError"),
     ("not TOML", "[[rule]\nid = 'ONE'\n", r"rules_not_toml: {path}: [^\n]+"),
+    ("an over-long integer", OVER_LONG_INTEGER, r"rules_not_toml: {path}: [^\n]+"),
     ("fails validation", "[doc_only]\n[model_definition]\n", r"rules_missing_section: rule"),
     ("an id with a control character",
      '[[rule]]\nid = "A\\tB"\nclass = "C1"\nexact = ["a.txt"]\n[doc_only]\n[model_definition]\n',
@@ -629,6 +782,13 @@ def test_the_entry_point_refuses_a_missing_file(capsys, tmp_path):
     assert len(errors) == 1 and errors[0].startswith("merge_guard_refused: rules_unreadable: ")
 
 
+def test_the_entry_point_refuses_a_path_with_a_nul(capsys):
+    path = "rules\0.toml"
+    status, rows, errors = _main(capsys, ["a.txt\n"], ["--rules", path])
+    assert (status, rows) == (2, [])
+    assert errors == [f"merge_guard_refused: rules_unreadable: {path!a}: ValueError"]
+
+
 def test_empty_input_checks_a_file_without_classifying_anything(capsys, tmp_path):
     """The documented way to validate a file: run it with no changed paths."""
     assert _main(capsys, [], ["--rules", str(EXAMPLE)]) == (0, [], [])
@@ -693,6 +853,81 @@ def test_the_script_refuses_an_id_that_would_inject_a_row(tmp_path, label, spell
     assert done.returncode == 2
     assert done.stdout == ""
     assert done.stderr == "merge_guard_refused: rules_rule_id_invalid: rule[0].id\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "spelled"), CONTROL_IDS_IN_TOML, ids=[case[0] for case in CONTROL_IDS_IN_TOML]
+)
+def test_the_script_refuses_an_unknown_key_with_a_control_character_as_one_line(
+    tmp_path, label, spelled
+):
+    """A quoted key can hold what an id may not, and the refusal for an unknown field
+    names the key. It is listed as ``ascii(key)``: one line, whatever the key holds."""
+    rules = _key_file(tmp_path, spelled)
+    key = next(iter(tomllib.loads(rules.read_text(encoding="utf-8"))))
+    done = _run_script(tmp_path, "a.txt\n", "--rules", str(rules))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert len(done.stderr.splitlines()) == 1, done.stderr
+    assert done.stderr == f"merge_guard_refused: rules_unknown_field: {key!a}\n"
+
+
+def test_a_key_cannot_forge_a_refusal_line(tmp_path):
+    # Three layers of escaping: this source, the TOML key, and the line that is printed.
+    forged = r"x\nmerge_guard_refused: rules_class_invalid: rule[0].class"
+    done = _run_script(tmp_path, "a.txt\n", "--rules", str(_key_file(tmp_path, forged)))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr == (
+        "merge_guard_refused: rules_unknown_field: "
+        + r"'x\nmerge_guard_refused: rules_class_invalid: rule[0].class'"
+        + "\n"
+    )
+
+
+def _parser_message(source: str) -> str:
+    """What ``tomllib`` says about *source*, which is not TOML. The wording is CPython's."""
+    try:
+        tomllib.loads(source)
+    except ValueError as exc:
+        return str(exc)
+    raise AssertionError(f"{source!r} is TOML")
+
+
+#: Text that reads as a second refusal, for a path to carry after a line break.
+FORGED_REFUSAL = "merge_guard_refused: rules_class_invalid: rule[0].class"
+
+#: Rule files the command line can name whose refusal echoes the path, as (label, the
+#: file's text or ``None`` for no file, the reason, what the refusal says after the path).
+PATH_ECHOES = [
+    ("a missing file", None, "rules_unreadable", "FileNotFoundError"),
+    ("a file that is not TOML", "[[rule]\n", "rules_not_toml", _parser_message("[[rule]\n")),
+    ("a file nested too deep", "x = " + "[" * 5000 + "]" * 5000 + "\n",
+     "rules_not_toml", "nesting too deep"),
+]
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "reason", "tail"), PATH_ECHOES, ids=[case[0] for case in PATH_ECHOES]
+)
+@pytest.mark.parametrize(
+    ("break_label", "char"), LINE_BREAKS, ids=[case[0] for case in LINE_BREAKS]
+)
+def test_a_path_cannot_forge_a_refusal_line(
+    tmp_path, break_label, char, label, text, reason, tail
+):
+    """The refusal names the file, and one command-line argument can hold a line break.
+    Printed raw, what follows the break would read as a second refusal, and a consumer
+    that reads the last line would get a reason the file never earned. The path is written
+    as ``ascii(path)``, as a key is: the refusal stays one line."""
+    path = tmp_path / f"x{char}{FORGED_REFUSAL}"
+    if text is not None:
+        path.write_text(text, encoding="utf-8")
+    done = _run_script(tmp_path, "a.txt\n", "--rules", str(path))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert len(done.stderr.splitlines()) == 1, done.stderr
+    assert done.stderr == f"merge_guard_refused: {reason}: {str(path)!a}: {tail}\n"
 
 
 # The documentation.

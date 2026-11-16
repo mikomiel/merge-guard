@@ -106,7 +106,7 @@ empty `[doc_only]` or `[model_definition]` table is fine, an absent one is not.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `id` | string | yes | The name the classifier reports for the rule. Unique in the file, not blank, free of control characters, and not one of the classifier's own ids. A published id is a contract: callers branch on it. |
+| `id` | string | yes | The name the classifier reports for the rule. Unique in the file, not blank, without whitespace or an invisible format character (Unicode category `Cf`, such as a zero-width space) at either end, free of control characters, and not one of the classifier's own ids. A published id is a contract: callers branch on it. |
 | `class` | string | yes | Always `"C1"`. |
 | `exact` | list of strings | one of `exact` and `prefixes` | A path matches when it equals an entry. |
 | `prefixes` | list of strings | one of `exact` and `prefixes` | A path matches when it starts with an entry. An entry is plain text, so write a directory as `dir/`. |
@@ -116,7 +116,9 @@ empty `[doc_only]` or `[model_definition]` table is fine, an absent one is not.
 The `id` is the first column of every row the script prints, and a refusal can
 name it. A tab, a newline, a carriage return, any other control character
 (Unicode category `Cc`), U+2028 or U+2029 in an id would shift a column or end
-the row early, so a file with such an id is refused.
+the row early, so a file with such an id is refused. Whitespace at either end of
+an id is refused too, because it does not show in a row: `AUTH` and `AUTH ` would
+read as one id. Spaces inside an id are allowed.
 
 ### `doc_only`
 
@@ -187,14 +189,14 @@ renamed or reused.
 
 | Reason | Raised when |
 | --- | --- |
-| `rules_unreadable` | The file cannot be read as UTF-8 text: it is missing, is a directory or is not text. The detail names the file and the error class. |
-| `rules_not_toml` | The file is not valid TOML. A repeated key is invalid TOML. The detail carries the parser's message. |
+| `rules_unreadable` | The file cannot be read as UTF-8 text: it is missing, is a directory, is not text, or its path holds a NUL. The detail names the file and the error class. A path that holds a control character is written as `ascii(str(path))`, so the refusal stays one line. |
+| `rules_not_toml` | The file is not valid TOML. A repeated key is invalid TOML, and so is an integer with more digits than the interpreter converts (4300 by default). The detail names the file and carries the parser's message. A path that holds a control character is written as `ascii(str(path))`, as for `rules_unreadable`. |
 | `rules_wrong_type` | A value has the wrong type: `rule` is not an array of tables, a section is not a table, `id` is not a string, a field is not a list, or an entry is not a string. |
-| `rules_unknown_field` | A section or field that the format does not define, including a misspelling. The detail lists every one, sorted. |
+| `rules_unknown_field` | A section or field that the format does not define, including a misspelling. The detail lists every one, sorted. A name that holds a control character, or is not a string (possible only in process), is listed as `ascii(str(name))`, so the refusal stays one line. |
 | `rules_missing_section` | `rule`, `doc_only` or `model_definition` is absent, or `rule` holds no tables. The detail lists every missing section, sorted. |
 | `rules_missing_field` | A rule has no `id` or no `class`, or selects nothing because `exact` and `prefixes` are both absent or empty. |
 | `rules_rule_id_empty` | A rule's `id` is empty or holds only whitespace that is not a control character. An id of only tabs or newlines is `rules_rule_id_invalid`. |
-| `rules_rule_id_invalid` | A rule's `id` holds a control character: a tab, a newline, a carriage return, any other character of Unicode category `Cc`, or U+2028 or U+2029. The detail names the field, never the id. |
+| `rules_rule_id_invalid` | A rule's `id` holds a control character: a tab, a newline, a carriage return, any other character of Unicode category `Cc`, or U+2028 or U+2029. It is also raised for an `id` that starts or ends with whitespace or a format character (Unicode category `Cf`). Spaces inside an id are allowed. The detail names the field, never the id. |
 | `rules_rule_id_duplicate` | An `id` is used twice, or is one of the classifier's own ids. The detail names the id. |
 | `rules_class_invalid` | A rule's `class` is anything other than `"C1"`. |
 | `rules_entry_invalid` | An entry is almost certainly a mistake. See [Entries](#entries). |
@@ -284,7 +286,7 @@ $ echo $?
 ## The reference set
 
 `scripts/reference-rules.toml` is the rule set that runs when no file is
-supplied. Its rule ids, its section references and the reasons in its comments
-belong to the policy of the repository the classifier was extracted from. Read
-it as a larger example of the same format, not as a layout to adopt. The C3
-allowlists in it are empty.
+supplied. Its rule ids and the reasons in its comments belong to the policy of
+the repository the classifier was extracted from. Read it as a larger example
+of the same format, not as a layout to adopt. The C3 allowlists in it are
+empty.
