@@ -35,7 +35,7 @@ transport; the forge port (#34) separates it.
 | Layer | Owns | Credential |
 |---|---|---|
 | Contract and fixtures | Refusal codes, verdict cases, policy schema, recorded forge responses as JSON data | None |
-| Engine | The verdict, the classifier, later the executor; no I/O of its own | None |
+| Engine | The verdict, the classifier, later the executor; its only I/O is reading the classifier rule file | None |
 | Forge adapters | GitHub and Forgejo transport behind one port | The caller's |
 | Surfaces | The composite Action; the command line installed from a release tag; later an executor container | The surface's own |
 

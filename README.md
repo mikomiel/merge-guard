@@ -64,6 +64,13 @@ The action inputs, the command line, the JSON output, the exit codes and the
 policy schema are one contract: [docs/cli.md](docs/cli.md). It is the file to
 read before building anything on top of the gate.
 
+The classifier's rules are data. With none supplied it applies the reference
+rule set it ships with, `scripts/reference-rules.toml`; a repository with another
+layout supplies its own file, and `scripts/assurance.py --rules FILE` refuses a
+file it cannot use. [docs/classifier-rules.md](docs/classifier-rules.md) documents
+the format and every refusal reason, with a worked example in
+`examples/classifier-rules.toml`.
+
 ## Carried approvals
 
 Required branches-up-to-date stays on, so a base advance normally invalidates
