@@ -1,4 +1,5 @@
-# Replace before use: the merge-guard ref with the release SHA.
+# Replace before use: `uses: ./` in the gate step with the pinned release ref,
+# as in examples/merge.yml.
 # .github/workflows/merge-guard-merge.yml — runs whenever the gate publishes.
 #
 # The review workflow is the only prerequisite trigger. It is itself triggered

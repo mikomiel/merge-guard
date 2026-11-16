@@ -93,6 +93,23 @@ A bump is the same procedure with a different tag. Nothing is edited in place:
 - carrying both an authored copy and a vendored copy at the same time is the one
   state to avoid, because which one runs becomes a matter of import order.
 
+## Bumping this repository's own gate
+
+This repository runs its own gate, and the release is pinned in one line:
+`uses: mikomiel/merge-guard@<sha>  # <tag>: <text>` in
+`.github/workflows/merge-guard-review.yml`. A bump is one edit of that line: the
+40-hex SHA and the tag in the trailing comment.
+
+The merge workflow runs the checked-out tree (`uses: ./`) and carries no pin.
+The files under `examples/` keep the all-zero placeholder by design: a consumer
+replaces it with a real release ref.
+
+`tests/test_release_config.py` proves the pin is consistent: it is the only
+`mikomiel/merge-guard@` reference in `.github/workflows/`, the ref is 40
+lowercase hex, and the SHA is the commit the comment tag names. The test needs
+the tag in the clone, so run `git fetch --tags` first if it fails. CI checks out
+with full history for the same reason.
+
 ## Rolling back
 
 Restore the previous implementation from your own history, delete the vendor
