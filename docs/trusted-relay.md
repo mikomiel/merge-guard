@@ -64,9 +64,11 @@ association observed in practice, where the forge reassigned a review to a head
 created 34 minutes after it was submitted (#15). It cannot establish what the
 reviewer read: a committer date is chosen by whoever creates the commit, so a
 head authored with a backdated date defeats the comparison. Closing that gap
-needs an assurance the forge does not own — a review body naming the head it
-reviewed, or a trusted record of the association at review time — which this
-gate does not yet require (issue #20).
+needs an assurance the forge does not own, and this gate does not yet require
+one. [design/reviewed-head.md](design/reviewed-head.md) compares the options
+and proposes one (issue #20): the approving review ends with a
+`Reviewed-Head:` line that names the head it read, behind a policy switch that
+is off by default.
 
 `commit_id` alone is not trusted. The forge can reassign it to a commit that did
 not exist at submission time, and `original_commit_id` is `null` in observed
