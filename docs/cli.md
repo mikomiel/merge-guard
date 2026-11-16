@@ -4,7 +4,8 @@ This document is the frozen contract between the action and the repositories
 that consume it. `tests/test_contract.py` pins the parts that can be checked
 mechanically: the action inputs, the policy field set, the modes and the exit
 codes. A change to any of them is a breaking change and needs a new release,
-not a patch.
+not a patch. Before 1.0.0 a breaking change raises the minor version
+(0.1.0 to 0.2.0); the major version is reserved for the first stable release.
 
 ## The action
 
