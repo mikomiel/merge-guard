@@ -26,6 +26,10 @@ concurrency:
 
 jobs:
   merge:
+    # The only fact the release workflow needs. A merge that lands nothing leaves
+    # it "false", so an hourly sweep or a review pass costs no release run.
+    outputs:
+      merged: ${{ steps.gate.outputs.merged }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -33,7 +37,21 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: mikomiel/merge-guard@65c985a7de7a7f699c5407eb4da30b7f8a198b3b  # v0.0.2: the temporal approval check
+      # The default-branch tree this workflow already checks out, not the released
+      # tag: the `merged` output has to exist before the next release carries it.
+      - id: gate
+        uses: ./
         with:
           mode: merge
           token: ${{ github.token }}
+
+  release:
+    # A `workflow_run` trigger on this workflow fired on every completion, merged
+    # or not, which cost one release run per sweep and per review pass.
+    needs: merge
+    if: needs.merge.outputs.merged == 'true'
+    uses: ./.github/workflows/release-please.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write

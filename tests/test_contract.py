@@ -17,7 +17,12 @@ def test_action_inputs_are_pinned():
     assert set(action["inputs"]) == {"mode", "policy", "token"}
     assert action["inputs"]["mode"]["required"] is True
     assert action["inputs"]["policy"]["default"] == ".github/merge-guard.toml"
-    step = action["runs"]["steps"][-1]
+    # One output, derived from the envelope: a consumer may gate a release on it.
+    assert set(action["outputs"]) == {"merged"}
+    assert action["outputs"]["merged"]["value"] == "${{ steps.envelope.outputs.merged }}"
+    step = next(
+        item for item in action["runs"]["steps"] if "scripts/merge_guard.py" in item.get("run", "")
+    )
     run = step["run"]
     assert "$GITHUB_ACTION_PATH/scripts/merge_guard.py" in run
     assert "--apply" in run
@@ -67,3 +72,32 @@ def test_the_document_covers_every_mode_and_exit_code():
         assert f"`{mode}`" in text
     for code in (cli.EXIT_OK, cli.EXIT_OPERATIONAL, cli.EXIT_UNUSABLE):
         assert f"| {code} |" in text
+
+
+def test_the_action_captures_the_envelope_and_reports_it_through_github_output():
+    """The `merged` output exists only if the shell wiring between the steps survives.
+
+    The engine's stdout is the envelope. One step tees it to a file and the next
+    hands that file, plus GitHub's output file, to the helper. Both halves are
+    shell source, so neither `tests/test_envelope.py` nor the release-config
+    assertions can see a break in the connection between them.
+    """
+    action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    steps = {step.get("id"): step for step in action["runs"]["steps"] if step.get("id")}
+    assert set(steps) == {"guard", "envelope"}
+    guard, report = steps["guard"], steps["envelope"]
+    envelope = "${{ runner.temp }}/merge-guard-envelope.json"
+    assert guard["env"]["MERGE_GUARD_ENVELOPE"] == envelope
+    assert report["env"]["MERGE_GUARD_ENVELOPE"] == envelope
+    assert "set -o pipefail" in guard["run"]
+    assert '| tee "$MERGE_GUARD_ENVELOPE"' in guard["run"]
+    assert '"$MERGE_GUARD_ENVELOPE"' in report["run"]
+    assert '"$GITHUB_OUTPUT"' in report["run"]
+    # Path and argument order: a swap here would still pass the substring checks.
+    assert (
+        'python3 "$GITHUB_ACTION_PATH/scripts/merge_guard_envelope.py" '
+        '"$MERGE_GUARD_ENVELOPE" "$GITHUB_OUTPUT"'
+    ) in report["run"]
+    # Nothing templated reaches shell source.
+    assert "${" + "{" not in guard["run"]
+    assert "${" + "{" not in report["run"]
