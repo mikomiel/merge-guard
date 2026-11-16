@@ -368,7 +368,9 @@ class Forgejo:
             state = item.get("state")
             if state == "REQUEST_REVIEW":
                 continue
-            mapped = REVIEW_STATES.get(state, state) if isinstance(state, str) else state
+            # A state that is not a string becomes None, which the engine refuses
+            # as unknown_review_state; a list or an object cannot be a set member.
+            mapped = REVIEW_STATES.get(state, state) if isinstance(state, str) else None
             if mapped in {"APPROVED", "CHANGES_REQUESTED"}:
                 dismissed = item.get("dismissed")
                 if type(dismissed) is not bool:

@@ -353,6 +353,15 @@ def test_a_review_list_that_does_not_hold_its_count_is_refused(returned, total):
         api._pages("pulls/7/files")
 
 
+@pytest.mark.parametrize("state", [[], {}, ["APPROVED"], 1, None])
+def test_a_review_state_that_is_not_a_string_is_passed_on_as_none(state):
+    # The engine refuses None as unknown_review_state, so a malformed state is a
+    # refusal, not a traceback.
+    path = "/repos/example/widgets/pulls/7/reviews"
+    api = adapter([settings(), page(path, 1, [{**APPROVAL, "state": state}], 1)])
+    assert [(item["id"], item["state"]) for item in api.reviews(7)] == [(101, None)]
+
+
 def test_a_review_list_that_holds_its_count_is_read():
     path = "/repos/example/widgets/pulls/7/reviews"
     api = adapter([settings(), page(path, 1, [APPROVAL], 1)])
