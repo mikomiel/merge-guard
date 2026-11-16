@@ -29,12 +29,14 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token || github.token }}
         # Inputs reach the script as data through the environment, never spliced into the shell source.
+        # The action is the GitHub surface, so it names the forge itself: a policy written before the
+        # forge key existed keeps working, and a policy that names another forge is refused.
         MERGE_GUARD_MODE: ${{ inputs.mode }}
         MERGE_GUARD_POLICY: ${{ inputs.policy }}
         MERGE_GUARD_ENVELOPE: ${{ runner.temp }}/merge-guard-envelope.json
       run: |
         set -o pipefail
-        python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "$MERGE_GUARD_MODE" --apply --policy "$MERGE_GUARD_POLICY" \
+        python3 "$GITHUB_ACTION_PATH/scripts/merge_guard.py" "$MERGE_GUARD_MODE" --apply --forge github --policy "$MERGE_GUARD_POLICY" \
           | tee "$MERGE_GUARD_ENVELOPE"
     # The envelope already says whether a merge landed. Deriving the output from it
     # adds no CLI flag and no second source of truth for the same fact.

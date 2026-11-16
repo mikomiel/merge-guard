@@ -52,7 +52,8 @@ def gate_status(state="success", login="github-actions[bot]", kind="Bot", rid=1)
 def comparison(files, sha=BASE, head_committed_at=HEAD_COMMITTED_AT):
     return {"status": "ahead", "base_commit": {"sha": sha}, "merge_base_commit": {"sha": sha},
             "commits": [{"sha": HEAD, "commit": {"committer": {"date": head_committed_at}}}],
-            "files": [{"filename": f} if isinstance(f, str) else f for f in files]}
+            "files": [{"filename": f, "status": "modified"} if isinstance(f, str) else f
+                      for f in files]}
 
 
 def pull(**over):
@@ -85,8 +86,35 @@ def test_draft_pull_request_is_not_eligible():
 
 
 def test_rename_is_judged_on_both_sides():
-    rename = {"filename": "docs/guide.md", "previous_filename": ".github/workflows/x.yml"}
+    rename = {"filename": "docs/guide.md", "status": "renamed",
+              "previous_filename": ".github/workflows/x.yml"}
     assert decide(pr=pull(changed_files=1), files=[rename]) == (False, "sensitive_paths")
+
+
+@pytest.mark.parametrize("source", [{}, {"previous_filename": None}, {"previous_filename": ""}])
+def test_a_rename_that_does_not_name_its_old_path_is_refused(source):
+    # The old path could be a workflow, and the new path alone does not show it.
+    rename = {"filename": "docs/guide.md", "status": "renamed", **source}
+    assert decide(pr=pull(changed_files=1), files=[rename]) == (False, "invalid_changed_path")
+
+
+@pytest.mark.parametrize("status", [{}, {"status": None}, {"status": ""}, {"status": "moved"},
+                                    {"status": "Renamed"}, {"status": ["renamed"]}])
+def test_a_changed_file_without_a_documented_status_is_refused(status):
+    # The record could be a rename that names no old path.
+    item = {"filename": "docs/guide.md", **status}
+    assert decide(pr=pull(changed_files=1), files=[item]) == (False, "invalid_changed_path")
+
+
+def test_a_rename_between_ordinary_paths_is_eligible():
+    rename = {"filename": "docs/b.md", "status": "renamed", "previous_filename": "docs/a.md"}
+    assert decide(pr=pull(changed_files=1), files=[rename]) == (True, "eligible")
+
+
+def test_a_copy_is_judged_on_its_new_path():
+    # A copy leaves its source unchanged, and Forgejo names no source for one.
+    copy = {"filename": "docs/ci.yml", "status": "copied"}
+    assert decide(pr=pull(changed_files=1), files=[copy]) == (True, "eligible")
 
 
 def test_status_from_untrusted_creator_blocks():

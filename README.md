@@ -64,6 +64,13 @@ The action inputs, the command line, the JSON output, the exit codes and the
 policy schema are one contract: [docs/cli.md](docs/cli.md). It is the file to
 read before building anything on top of the gate.
 
+The policy file names its forge with `forge` in `[repository]`. The action is
+the GitHub surface and names GitHub itself, so a policy file without the key
+keeps working there; the command line refuses a run that names no forge. The
+command line also reads a Forgejo repository and reaches the same verdicts, but
+it does not write to Forgejo in this release. [docs/cli.md](docs/cli.md#forgejo)
+covers the setup and the limits.
+
 The classifier's rules are data. With none supplied it applies the reference
 rule set it ships with, `scripts/reference-rules.toml`; a repository with another
 layout supplies its own file, and `scripts/assurance.py --rules FILE` refuses a

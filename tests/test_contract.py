@@ -35,7 +35,7 @@ def test_action_inputs_are_pinned():
 
 
 FROZEN_SCHEMA = {
-    "repository": {"name", "base_branch"},
+    "repository": {"name", "base_branch", "forge"},
     "review": {
         "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
         "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",

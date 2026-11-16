@@ -1,0 +1,238 @@
+{
+  "case": "approved-at-head",
+  "forge": "github",
+  "kind": "verdict",
+  "description": "The configured reviewer approved this head after it was committed, and the required check ran green on it.",
+  "policy": {
+    "repository": {
+      "name": "example/widgets",
+      "base_branch": "main",
+      "forge": "github"
+    },
+    "review": {
+      "reviewer_id": 4242,
+      "reviewer_login": "review-bot[bot]",
+      "reviewer_type": "Bot",
+      "required_checks": [
+        "checks"
+      ],
+      "gate_context": "review",
+      "carry_unchanged_diff": false
+    },
+    "paths": {
+      "ordinary": [
+        "README.md",
+        "docs/**"
+      ],
+      "dependency_update_exemption": false
+    }
+  },
+  "run": {
+    "mode": "status",
+    "apply": false,
+    "event_head": null
+  },
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls?state=open&base=main&per_page=100&page=1"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "url": "https://api.github.com/repos/example/widgets/pulls/7",
+            "number": 7,
+            "state": "open",
+            "title": "docs: explain the widget limits",
+            "user": {
+              "login": "alice",
+              "id": 501,
+              "type": "User"
+            },
+            "draft": false,
+            "head": {
+              "label": "example:docs-widget-limits",
+              "ref": "docs-widget-limits",
+              "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "base": {
+              "label": "example:main",
+              "ref": "main",
+              "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "repo": {
+                "id": 1001,
+                "full_name": "example/widgets"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls/7"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "url": "https://api.github.com/repos/example/widgets/pulls/7",
+          "number": 7,
+          "state": "open",
+          "title": "docs: explain the widget limits",
+          "user": {
+            "login": "alice",
+            "id": 501,
+            "type": "User"
+          },
+          "draft": false,
+          "head": {
+            "label": "example:docs-widget-limits",
+            "ref": "docs-widget-limits",
+            "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "base": {
+            "label": "example:main",
+            "ref": "main",
+            "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "repo": {
+              "id": 1001,
+              "full_name": "example/widgets"
+            }
+          },
+          "merged": false,
+          "mergeable": true,
+          "mergeable_state": "clean",
+          "merge_commit_sha": null,
+          "changed_files": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls/7/reviews?per_page=100&page=1"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 2400000101,
+            "user": {
+              "login": "review-bot[bot]",
+              "id": 4242,
+              "type": "Bot"
+            },
+            "body": "Reviewed this head.",
+            "state": "APPROVED",
+            "commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "submitted_at": "2026-11-11T07:30:30Z",
+            "author_association": "NONE"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "commit": {
+            "message": "docs: explain the widget limits",
+            "author": {
+              "name": "Alice",
+              "email": "alice@example.com",
+              "date": "2026-11-11T07:29:06Z"
+            },
+            "committer": {
+              "name": "Alice",
+              "email": "alice@example.com",
+              "date": "2026-11-11T07:29:06Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls/7"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "url": "https://api.github.com/repos/example/widgets/pulls/7",
+          "number": 7,
+          "state": "open",
+          "title": "docs: explain the widget limits",
+          "user": {
+            "login": "alice",
+            "id": 501,
+            "type": "User"
+          },
+          "draft": false,
+          "head": {
+            "label": "example:docs-widget-limits",
+            "ref": "docs-widget-limits",
+            "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "base": {
+            "label": "example:main",
+            "ref": "main",
+            "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "repo": {
+              "id": 1001,
+              "full_name": "example/widgets"
+            }
+          },
+          "merged": false,
+          "mergeable": true,
+          "mergeable_state": "clean",
+          "merge_commit_sha": null,
+          "changed_files": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/check-runs?filter=latest&per_page=100&page=1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "total_count": 1,
+          "check_runs": [
+            {
+              "id": 30000000001,
+              "name": "checks",
+              "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "status": "completed",
+              "conclusion": "success",
+              "app": {
+                "id": 15368,
+                "slug": "github-actions"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expect": {
+    "result": {
+      "heads": {
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+          "success",
+          "approved_at_head"
+        ]
+      }
+    }
+  }
+}

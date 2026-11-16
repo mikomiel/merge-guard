@@ -1,5 +1,7 @@
 """Runner behaviour: the ci-burst guards the port must keep."""
 
+import subprocess
+
 import pytest
 
 from merge_guard import engine as runner
@@ -73,7 +75,7 @@ class Fake:
         return {"status": "ahead", "base_commit": {"sha": base},
                 "merge_base_commit": {"sha": base},
                 "commits": [{"sha": head, "commit": {"committer": {"date": COMMITTED_AT}}}],
-                "files": [{"filename": "README.md"}]}
+                "files": [{"filename": "README.md", "status": "modified"}]}
 
     def commit_time(self, sha):
         return COMMITTED_AT
@@ -212,6 +214,19 @@ def test_pulls_are_filtered_to_the_base_branch():
     api.request = request
     api.pulls()
     assert seen == ["pulls?state=open&base=main&per_page=100&page=1"]
+
+
+@pytest.mark.parametrize("stdout", ["<html>maintenance</html>", "[" * 100_000,
+                                    '{"id": ' + "9" * 5000 + "}"])
+def test_a_github_body_that_cannot_be_parsed_is_refused(monkeypatch, stdout):
+    # The second body nests deeper than the parser's recursion limit; the third
+    # holds an integer longer than Python reads from a string.
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(runner.ApiError, match="github_response_unreadable"):
+        runner.GitHub(policy()).branch_head("main")
 
 
 def test_check_runs_pagination_requires_a_stable_total():
