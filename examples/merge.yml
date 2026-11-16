@@ -16,6 +16,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # GitHub closes linked issues only for a merge performed with `issues: write`.
+  issues: write
   checks: read
   statuses: read
 

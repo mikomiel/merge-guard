@@ -17,6 +17,7 @@ merge.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from . import policy as mg
@@ -235,6 +236,51 @@ def run_review(api: Forge, policy: mg.Policy, apply: bool, event_head: str | Non
     return {"heads": {head: verdict for head, verdict in plan.items()}}
 
 
+#: Cleanup is best effort and must never threaten the report of a proven merge:
+#: the job that merges has ten minutes, so the close attempt is bounded in both
+#: requests and wall-clock time, and whatever is left is reported as unclosed.
+MAX_CLOSES = 3
+CLOSING_DEADLINE_SECONDS = 20.0
+
+
+def close_referenced_issues(api: Forge, pull_number: int) -> tuple[list[int], list[int], bool]:
+    """Close the issues the forge itself says this merge closes, if still open.
+
+    The forge parses the body; the engine never does. GitHub skips its own
+    auto-close when the identity that performs the merge lacks `issues: write`,
+    so this repeats the same authoritative list (`closingIssuesReferences`)
+    instead of reimplementing the parser.
+    """
+    closed: list[int] = []
+    refused: list[int] = []
+    unread = False
+    # The budget starts before the list read: the read is cleanup traffic too.
+    deadline = time.monotonic() + CLOSING_DEADLINE_SECONDS
+    try:
+        numbers = api.closing_issues(pull_number)
+    except (ApiError, mg.Unusable):
+        # The merge is proven; a cleanup that could not be evaluated is reported
+        # as unread rather than as "this merge names no issues".
+        return closed, refused, True
+    for index, number in enumerate(numbers):
+        if index >= MAX_CLOSES or time.monotonic() >= deadline:
+            # Named but not attempted: reported, never silently dropped.
+            refused.extend(numbers[index:])
+            break
+        if number == pull_number:
+            continue
+        try:
+            issue = api.request(f"issues/{number}")
+            if (not isinstance(issue, dict) or issue.get("pull_request")
+                    or issue.get("state") != "open"):
+                continue
+            api.close_issue(number)
+            closed.append(number)
+        except (ApiError, mg.Unusable):
+            refused.append(number)
+    return closed, refused, unread
+
+
 def run_merge(api: Forge, policy: mg.Policy, apply: bool) -> list[dict[str, Any]]:
     snapshot = collect_reviews(api, set(), policy)
     plan = mg.review_plan(snapshot, policy)
@@ -268,6 +314,15 @@ def run_merge(api: Forge, policy: mg.Policy, apply: bool) -> list[dict[str, Any]
         if eligible and apply:
             api.merge(number, head)
             decision["merged"] = True
+            closed, refused, unread = close_referenced_issues(api, number)
+            # Present only when there is something to report, so an ordinary merge
+            # keeps the envelope the fixture cases and consumers already know.
+            if closed:
+                decision["issues_closed"] = closed
+            if refused:
+                decision["issues_unclosed"] = refused
+            if unread:
+                decision["issues_unread"] = True
         if eligible:
             # One admitted merge per run; the base moved, so the next run decides.
             break

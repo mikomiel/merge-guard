@@ -71,7 +71,15 @@ stdout object at all — the refusal line goes to stderr.
 
 - `status` and `review` return `result.heads`: a map from head SHA to a
   `[state, reason]` pair.
-- `merge` returns a list of `{number, head, eligible, merged, reason?}`.
+- `merge` returns a list of `{number, head, eligible, merged, reason?, issues_closed?, issues_unclosed?, issues_unread?}`.
+  After a proven merge the engine asks the forge which issues the pull request
+  closes (`closingIssuesReferences`, the forge's own parse of the body) and closes
+  the ones still open. The engine never models Markdown. GitHub skips its own
+  auto-close when the identity that merges lacks `issues: write`, which is why the
+  merge workflow grants it and the engine repeats the close. `issues_unclosed`
+  names what a refusal left open, `issues_unread` records that the forge's list
+  could not be read at all (so nothing was evaluated), and the merge is never
+  retried for either.
 - `apply` is the flag the run used. `status` always reports `false`.
 
 Refusals go to stderr, one line each: `merge_guard_refused: <code>` for an

@@ -36,13 +36,16 @@ Records:
   of ``policy.CHANGED_FILE_STATUSES``, and ``patch`` only where the forge
   returns one).
 - permission: ``request("collaborators/{login}/permission")`` answers
-  ``permission`` and ``user.id``. Both forges serve that path in that shape,
-  and it is the only path the engine reads through ``request``; the test
-  double the engine is tested against implements exactly this call.
+  ``permission`` and ``user.id``. Both forges serve that path in that shape.
+  The engine also reads ``request("issues/{number}")`` before closing an issue,
+  to confirm it is open and is not itself a pull request, and asks
+  ``closing_issues(number)`` which issues the merge closes. The test double the
+  engine is tested against implements all three calls.
 
-Writes (``publish``, ``merge``, ``comment``) need an adapter built with
-``apply=True``. ``merge`` is the expected-head merge: it merges ``sha`` or
-refuses, and it proves the result by re-reading the pull request.
+Writes (``publish``, ``merge``, ``comment``, ``close_issue``) need an adapter
+built with ``apply=True``. ``merge`` is the expected-head merge: it merges
+``sha`` or refuses, and it proves the result by re-reading the pull request.
+``close_issue`` proves the issue reports ``state: closed`` or refuses.
 """
 
 from __future__ import annotations
@@ -72,7 +75,7 @@ class Forge(Protocol):
         ...
 
     def request(self, path: str) -> Any:
-        """A repository-relative read; the engine uses it for permission only."""
+        """A repository-relative read: collaborator permission, and the issue a close names."""
         ...
 
     def check_runs(self, sha: str) -> list[dict[str, Any]]:
@@ -105,4 +108,17 @@ class Forge(Protocol):
 
     def comment(self, number: int, body: str) -> None:
         """Add a comment to the pull request."""
+        ...
+
+    def close_issue(self, number: int) -> None:
+        """Close one issue; the adapters refuse rather than assume it worked."""
+        ...
+
+    def closing_issues(self, number: int) -> list[int]:
+        """Issue numbers the forge itself says this pull request closes.
+
+        GitHub answers from ``closingIssuesReferences``, its own parse of the body;
+        a forge without such a list answers empty, and the engine then closes
+        nothing rather than modelling Markdown itself.
+        """
         ...

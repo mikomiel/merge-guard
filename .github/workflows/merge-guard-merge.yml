@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # GitHub closes a pull request's linked issues only when the identity that
+  # performs the merge holds `issues: write`; without it the auto-close is skipped
+  # silently. The engine repeats the close from the forge's own list.
+  issues: write
   checks: read
   statuses: read
 
