@@ -29,8 +29,9 @@ is [cli.md](cli.md); nothing here changes it.
 
 ## Target layers
 
-These are the target layers. Today the engine still contains the GitHub
-transport; the forge port (#34) separates it.
+These are the target layers. The engine reads the forge only through the port
+in `merge_guard/forge.py`, and `merge_guard/github.py` and
+`merge_guard/forgejo.py` are its adapters (#34).
 
 | Layer | Owns | Credential |
 |---|---|---|

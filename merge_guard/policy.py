@@ -14,7 +14,7 @@ approvals on a new commit in ways this gate cannot verify from a snapshot.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
@@ -27,6 +27,12 @@ DEPENDENCY_MANIFESTS = frozenset({
     "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "go.sum", "Cargo.lock",
 })
 SEVERITY = {"success": 0, "pending": 1, "failure": 2}
+#: The forges a policy can name. There is no default: see :func:`require_forge`.
+FORGES = ("github", "forgejo")
+#: The creator the gate trusts for its own status, as (login, type). On GitHub
+#: it is the identity that a workflow using the repository token writes as. A
+#: Forgejo adapter reports a status written by its own account this way.
+GATE_PUBLISHER = ("github-actions[bot]", "Bot")
 # A review and the commit it names are timestamped by different clocks: the
 # review's server timestamp by the forge, the commit's own committer date by
 # whoever authored it. Clock skew between them must not reject a genuine
@@ -78,13 +84,17 @@ class Policy:
     # repository that must bind the approval to the commit itself turns it off
     # and then a new commit always needs a new approval.
     carry_unchanged_diff: bool
+    # The forge the policy names, or None when the file names none. A file
+    # written before the key existed still loads; whatever opens the forge then
+    # has to name it (require_forge), because there is no default forge.
+    forge: str | None = None
 
 
 #: Every field the schema accepts. An unknown field is a refusal, not a warning:
 #: a typo would otherwise silently change which rule runs. ``docs/cli.md`` owns
 #: the prose and ``tests/test_contract.py`` pins these sets against it.
 KNOWN_FIELDS: dict[str, frozenset[str]] = {
-    "repository": frozenset({"name", "base_branch"}),
+    "repository": frozenset({"name", "base_branch", "forge"}),
     "review": frozenset({
         "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
         "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",
@@ -105,6 +115,7 @@ def load_policy(data: Any) -> Policy:
         paths = data.get("paths", {})
         repository = repo["name"]
         base_branch = repo["base_branch"]
+        forge = repo.get("forge")
         reviewer_id = review["reviewer_id"]
         reviewer_login = review["reviewer_login"]
         reviewer_type = review.get("reviewer_type", "Bot")
@@ -134,9 +145,27 @@ def load_policy(data: Any) -> Policy:
         raise Unusable("policy_dependency_exemption_invalid")
     if type(carry) is not bool:
         raise Unusable("policy_carry_unchanged_diff_invalid")
+    if forge is not None and forge not in FORGES:
+        raise Unusable("policy_forge_invalid")
     return Policy(repository, base_branch, reviewer_id, reviewer_login, reviewer_type,
                   tuple(checks), gate, tuple(ordinary), exemption,
-                  review_workflow, merge_workflow, carry)
+                  review_workflow, merge_workflow, carry, forge)
+
+
+def require_forge(policy: Policy, named: str | None = None) -> Policy:
+    """The policy with its forge named, or a refusal: there is no default forge.
+
+    ``named`` is a forge named outside the file, for example by the composite
+    action's run line. The two must agree when both are present, so a surface
+    cannot silently retarget a policy written for the other forge.
+    """
+    if named is not None and named not in FORGES:
+        raise Unusable("policy_forge_invalid")
+    if policy.forge is None and named is None:
+        raise Unusable("policy_forge_missing")
+    if policy.forge is not None and named is not None and named != policy.forge:
+        raise Unusable("policy_forge_conflict")
+    return replace(policy, forge=policy.forge or named)
 
 
 def valid_sha(value: Any) -> bool:
@@ -170,8 +199,8 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
     """Latest decisive state per verified identity; any change request blocks.
 
     ``maintainers`` holds numeric user ids the API verified as write/maintain/
-    admin. Association labels alone never grant that authority, and a review by
-    the pull request author never counts.
+    admin (or owner, on Forgejo). Association labels alone never grant that
+    authority, and a review by the pull request author never counts.
 
     An approval of ``head`` counts only when the review could have seen it. The
     forge may reassign a review's ``commit_id`` to a commit that did not exist
@@ -346,11 +375,16 @@ def checks_green(runs: Any, statuses: Any, head: str, policy: Policy) -> tuple[b
         return False, "review_status_not_success"
     creator = gate.get("creator")
     if (not isinstance(creator, dict)
-            or (creator.get("login"), creator.get("type")) != ("github-actions[bot]", "Bot")):
+            or (creator.get("login"), creator.get("type")) != GATE_PUBLISHER):
         return False, "untrusted_review_status"
     if any(s.get("state") != "success" for s in latest_statuses.values()):
         return False, "additional_status_not_green"
     return True, "checks_green"
+
+
+#: The changed-file statuses that GitHub and Forgejo document, together.
+CHANGED_FILE_STATUSES = frozenset({"added", "removed", "deleted", "modified", "changed",
+                                   "renamed", "copied", "unchanged"})
 
 
 def changed_paths(comparison: Any, declared: Any, base: str) -> list[str]:
@@ -370,6 +404,15 @@ def changed_paths(comparison: Any, declared: Any, base: str) -> list[str]:
     paths: list[str] = []
     for item in files:
         if not isinstance(item, dict) or not item.get("filename"):
+            raise Unusable("invalid_changed_path")
+        # A file whose status is unknown could be a rename that names no old
+        # path, so only a status that a forge documents is read.
+        status = item.get("status")
+        if not isinstance(status, str) or status not in CHANGED_FILE_STATUSES:
+            raise Unusable("invalid_changed_path")
+        # A rename changes its old path as well, so a rename that does not name
+        # that path would be judged on its new path alone.
+        if status == "renamed" and item.get("previous_filename") is None:
             raise Unusable("invalid_changed_path")
         for key in ("filename", "previous_filename"):
             path = item.get(key)

@@ -5,6 +5,10 @@
 [repository]
 name = "OWNER/REPO"
 base_branch = "main"
+# The forge this policy governs: "github" or "forgejo". There is no default.
+# Add it together with a pin of the release that knows the key: an older
+# release refuses a field it does not know.
+forge = "github"
 
 [review]
 # The reviewer identity the gate trusts. The numeric id is required: a login

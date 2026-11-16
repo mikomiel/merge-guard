@@ -15,6 +15,7 @@ POLICY = """
 [repository]
 name = "owner/repo"
 base_branch = "main"
+forge = "github"
 
 [review]
 reviewer_id = 1

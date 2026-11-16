@@ -1,0 +1,118 @@
+{
+  "case": "malformed-pull-draft-wrong-type",
+  "forge": "github",
+  "kind": "malformed",
+  "covers": "wrong_type",
+  "description": "The pull request reports draft as a string.",
+  "policy": {
+    "repository": {
+      "name": "example/widgets",
+      "base_branch": "main",
+      "forge": "github"
+    },
+    "review": {
+      "reviewer_id": 4242,
+      "reviewer_login": "review-bot[bot]",
+      "reviewer_type": "Bot",
+      "required_checks": [
+        "checks"
+      ],
+      "gate_context": "review",
+      "carry_unchanged_diff": false
+    },
+    "paths": {
+      "ordinary": [
+        "README.md",
+        "docs/**"
+      ],
+      "dependency_update_exemption": false
+    }
+  },
+  "run": {
+    "mode": "status",
+    "apply": false,
+    "event_head": null
+  },
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls?state=open&base=main&per_page=100&page=1"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "url": "https://api.github.com/repos/example/widgets/pulls/7",
+            "number": 7,
+            "state": "open",
+            "title": "docs: explain the widget limits",
+            "user": {
+              "login": "alice",
+              "id": 501,
+              "type": "User"
+            },
+            "draft": "false",
+            "head": {
+              "label": "example:docs-widget-limits",
+              "ref": "docs-widget-limits",
+              "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "base": {
+              "label": "example:main",
+              "ref": "main",
+              "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "repo": {
+                "id": 1001,
+                "full_name": "example/widgets"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/example/widgets/pulls/7"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "url": "https://api.github.com/repos/example/widgets/pulls/7",
+          "number": 7,
+          "state": "open",
+          "title": "docs: explain the widget limits",
+          "user": {
+            "login": "alice",
+            "id": 501,
+            "type": "User"
+          },
+          "draft": "false",
+          "head": {
+            "label": "example:docs-widget-limits",
+            "ref": "docs-widget-limits",
+            "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "base": {
+            "label": "example:main",
+            "ref": "main",
+            "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "repo": {
+              "id": 1001,
+              "full_name": "example/widgets"
+            }
+          },
+          "merged": false,
+          "mergeable": true,
+          "mergeable_state": "clean",
+          "merge_commit_sha": null,
+          "changed_files": 1
+        }
+      }
+    }
+  ],
+  "expect": {
+    "refusal": "github_pull_scope_unusable"
+  }
+}
