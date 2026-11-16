@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/mikomiel/merge-guard/compare/v0.2.0...v0.2.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **engine:** close the issues the forge says a merge closes ([#63](https://github.com/mikomiel/merge-guard/issues/63)) ([699dbac](https://github.com/mikomiel/merge-guard/commit/699dbacc4964f8c603e0b32f5c3a4498c3079aed)), closes [#62](https://github.com/mikomiel/merge-guard/issues/62)
+
 ## [0.2.0](https://github.com/mikomiel/merge-guard/compare/v0.1.0...v0.2.0) (2026-11-16)
 
 
