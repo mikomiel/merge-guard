@@ -17,6 +17,14 @@ not carry a closure, and a tag whose tree has no manifest is not consumable.
 A consumer pins a release by copying that closure verbatim and recording, per
 file, which release it came from. The copy is generated, never authored.
 
+The action is not part of this closure, and that is deliberate rather than an
+omission. A consumer runs `uses: mikomiel/merge-guard@<tag>`, which resolves the
+tag's tree directly, so `action.yml`, `scripts/merge_guard.py`,
+`scripts/merge_guard_envelope.py` and the `merge_guard/` package are consumed by
+ref. The closure holds the classifier files `release-manifest.json` names, and
+nothing else; add the action to it only as a new release decision, never as a
+manifest refresh.
+
 ## The procedure
 
 1. **Read the tag, not the branch.** `git rev-parse <tag>^{commit}` must name the
