@@ -98,6 +98,18 @@ def test_stale_head_check_blocks():
     assert decide(runs=[run(sha=OLD)]) == (False, "check_head_mismatch")
 
 
+def test_a_blocked_head_names_a_missing_required_run():
+    blocked = pull()
+    blocked["mergeable_state"] = "blocked"
+    assert decide(pr=blocked, runs=[]) == (False, "required_check_run_missing")
+
+
+def test_a_blocked_green_head_is_still_mergeability_not_clean():
+    blocked = pull()
+    blocked["mergeable_state"] = "blocked"
+    assert decide(pr=blocked) == (False, "mergeability_not_clean")
+
+
 def test_approval_on_an_older_head_does_not_count():
     assert decide(reviews=[review("APPROVED", commit=OLD)]) == (
         False, "current_head_approval_required")
@@ -265,7 +277,14 @@ def test_ordinary_is_an_allowlist_and_star_cannot_cross_a_slash():
 
 def test_a_missing_required_check_blocks():
     policy = make_policy(review={"required_checks": ["checks", "dependency-review"]})
-    assert decide(policy=policy) == (False, "required_check_not_success")
+    assert decide(policy=policy) == (False, "required_check_run_missing")
+
+
+def test_a_missing_run_is_not_a_failed_run():
+    policy = make_policy()
+    assert decide(policy=policy, runs=[]) == (False, "required_check_run_missing")
+    assert decide(policy=policy, runs=[run(conclusion="failure")]) == (
+        False, "required_check_not_success")
 
 
 def test_a_skipped_required_check_blocks():

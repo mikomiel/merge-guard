@@ -7,23 +7,36 @@ consumer's required check — commonly `checks` — for the exact head. The bran
 protection rule is `strict`, so the pull request cannot merge, and with
 `enforce_admins` on there is no manual override.
 
+The gate names the condition: `review` is `pending` with the description
+`required_check_missing: <name>`, and a merge run refuses
+`required_check_run_missing`. A required check that exists but is red or still
+running keeps its own `checks` context and the `required_check_not_success`
+refusal; only a missing run produces this state.
+
 **Cause.** `pull_request` workflows fire on `opened`, `synchronize` and
 `reopened`. In the case reported in issue #14 a base merge left the new head with
 no `checks` run while the gate's own workflow did run for it. Why GitHub did not
 dispatch a run for that head is not established from the workflows alone; what is
 established is the consequence, and that a new event fixes it.
 
-**Recovery.** Either of these makes GitHub dispatch a new event for the head, and
-both also re-run the gate so the head gets a fresh `review` status:
+**Recovery.** Close the pull request and reopen it, or push any commit to the
+branch. Either makes GitHub dispatch a new event for the head, so both required
+contexts run again; reopening leaves the branch's history untouched.
 
-- close the pull request and reopen it;
-- push any commit to the branch.
+A consumer whose required checks **all** run under `workflow_dispatch` can
+recover with a command instead:
 
-Prefer reopening: it leaves the branch's history untouched.
+`gh workflow run <ci-workflow>.yml --ref <pr-branch>`
+
+A dispatch restores only the required checks that the dispatched workflow
+produces. In this repository that is not the full set: `dependency-review` runs
+only on `pull_request`, so a dispatch of `checks.yml` leaves it skipped and the
+gate still refuses. This repository therefore recovers by reopening or pushing.
+A dispatch also works only for a same-repository branch; close/reopen is the
+fork-safe fallback.
 
 Re-running an older workflow run is **not** a recovery. A re-run acts on that
-run's own SHA, so it produces no evidence for the new head, and `checks.yml` here
-has no `workflow_dispatch` trigger to start one for the current head.
+run's own SHA, so it produces no evidence for the new head.
 
 ## The gate says `pending` and the review looks approved
 
@@ -43,6 +56,10 @@ worth checking:
 Request a fresh review of the current head, from a qualifying reviewer, rather
 than re-running the review workflow: re-reading the old approval cannot change
 either fact.
+
+The description `required_check_missing: <name>` is not a review verdict at all:
+the approval is at this head, but a required check has no run for it. Use the
+recovery in the section above.
 
 ## A pull request is approved, green, and still not merged
 
