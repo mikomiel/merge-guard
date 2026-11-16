@@ -680,6 +680,19 @@ def test_an_exemption_applies_per_path(example):
     assert mixed == assurance.ClassificationResult("C1", ("MIGRATIONS",))
 
 
+def test_an_exemption_suppresses_only_its_own_rule_on_a_shared_path():
+    rules = assurance.validate_rules(
+        _with(
+            rule=[
+                {"id": "WIDE", "class": "C1", "prefixes": ["svc/"], "exempt_suffixes": [".yml"]},
+                {"id": "YAML", "class": "C1", "prefixes": ["svc/"]},
+            ]
+        )
+    )
+    assert _classify({"svc/deploy.yml"}, rules) == assurance.ClassificationResult("C1", ("YAML",))
+    assert _classify({"svc/app.py"}, rules) == assurance.ClassificationResult("C1", ("WIDE", "YAML"))
+
+
 def test_exact_entries_match_whole_paths_and_prefixes_match_literally(example):
     for path in ("Dockerfile.bak", "x/Dockerfile", "ci/release.shx", "src/authors/a.py", "src/auth"):
         assert _classify({path}, example).gate_class == "C2", path
