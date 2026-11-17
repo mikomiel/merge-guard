@@ -52,6 +52,17 @@ def _yaml(path: Path) -> dict:
     return value
 
 
+def _release_step(job: dict) -> dict:
+    """The release-please action step: the first step of the job.
+
+    The steps after it regenerate the release manifest on the release branch.
+    tests/test_release_please_workflow.py pins all of them.
+    """
+    action = job["steps"][0]
+    assert action.get("id") == "release"
+    return action
+
+
 def test_release_type_and_tag_shape():
     config = _json(CONFIG)
     assert config["release-type"] == "python"
@@ -77,11 +88,11 @@ def test_the_manifest_version_and_the_project_version_move_together():
 
 def test_the_workflow_uses_the_token_that_can_trigger_checks():
     workflow = _workflow()
-    assert workflow["permissions"] == {
-        "contents": "write",
-        "pull-requests": "write",
-    }
-    (step,) = workflow["jobs"]["release-please"]["steps"]
+    # The personal access token makes every write, so the default token has no
+    # write grant: none at the workflow level, and only reads on the job.
+    assert workflow["permissions"] == {}
+    assert set(workflow["jobs"]["release-please"]["permissions"].values()) == {"read"}
+    step = _release_step(workflow["jobs"]["release-please"])
     assert PINNED_ACTION.fullmatch(step["uses"])
     assert step["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
     assert step["with"]["config-file"] == "release-please-config.json"
@@ -148,7 +159,7 @@ def test_the_release_workflow_is_called_or_pushed_and_never_observes_a_completio
 def test_the_release_job_pins_the_action_and_needs_no_branch_guard():
     job = _workflow()["jobs"]["release-please"]
     assert "if" not in job
-    (step,) = job["steps"]
+    step = _release_step(job)
     assert step["uses"].startswith("googleapis/release-please-action@")
     assert step["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
     assert step["with"]["manifest-file"] == ".release-please-manifest.json"

@@ -73,12 +73,27 @@ The default `GITHUB_TOKEN` cannot be used: a pull request it creates does not
 trigger the pull-request workflows, so the required checks would never run, and a
 merge it makes suppresses the `push`-triggered run, which is why the merge
 workflow calls the release workflow itself when its own run landed a pull
-request.
+request. A push made with `GITHUB_TOKEN` has the same defect, so the push of the
+regenerated manifest (below) uses the personal access token too.
 
 The release pull request always changes a path outside the ordinary allowlist, so
-the gate never merges it: a maintainer merges it. The release notes do not state
-the closure; `release-manifest.json` owns it (`docs/pin-bump.md`). A tag or a
-release is not a deployment.
+the gate never merges it: a maintainer merges it. It bumps `merge_guard/__init__.py`,
+which is in the closure, so the same workflow regenerates `release-manifest.json`
+on the release branch after release-please has written it
+(`.github/workflows/release-please.yml`, `docs/pin-bump.md`). The job checks out
+the default branch only, so the only code it runs is code that review has seen.
+The release branch is data: the job fetches that one ref, never checks it out,
+reads its files with `scripts/release_manifest.py write --commit`, and builds one
+commit, `chore(release): regenerate the release manifest`, with git plumbing on
+top of the fetched head. It builds nothing when the manifest is already right.
+Only the release-please action and the push step hold the token, and the push is
+a plain push, never a forced one. The steps of one job share a runner, so no step
+that reads what the release branch holds may hold the token. The maintainer
+regenerates nothing by hand. The first `checks` run on a head that
+release-please has just written fails and names the stale file; the run for the
+regeneration commit is the one that counts. The release notes do not state the
+closure; `release-manifest.json` owns it (`docs/pin-bump.md`). A tag or a release
+is not a deployment.
 
 ## Response expectations
 

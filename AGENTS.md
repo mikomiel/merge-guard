@@ -64,11 +64,25 @@ python -m pytest -q
 - `release-manifest.json` owns the release closure: the files a consumer copies,
   their SHA-256 and their size, taken from the checked-out commit's blobs.
   `checks` fails when a declared file differs from it, or is not a regular blob
-  in that commit. Extending the closure is a release decision, so the file stays
-  outside the ordinary allowlist.
+  in that commit. The closure is the classifier plus the `merge_guard/` package:
+  a test fails, naming the file, when a committed file under `merge_guard/` has
+  no entry. Extending the closure further is a release decision, so the file
+  stays outside the ordinary allowlist.
 - Release Please owns the version, the changelog and the tag. One release pull
-  request bumps `pyproject.toml` and `merge_guard/__init__.py` together; a
-  person merges it. Do not tag by hand and never move a published tag.
+  request bumps `pyproject.toml` and `merge_guard/__init__.py` together, and a
+  person merges it. `merge_guard/__init__.py` is in the closure, so
+  `.github/workflows/release-please.yml` regenerates `release-manifest.json` on
+  the release branch and pushes one commit when the manifest changed
+  (`docs/pin-bump.md`): no one regenerates it by hand. Do not tag by hand and
+  never move a published tag.
+- In that workflow the release branch is data, never code. The job checks out
+  the default branch only, fetches the release branch as one ref without a
+  checkout, and reads its files with `scripts/release_manifest.py write --commit`,
+  so the only code that runs is code that review has seen. The personal access
+  token is in the release-please action and in the push step alone: the steps of
+  one job share a runner, so no step that reads what the release branch holds
+  may hold it. `tests/test_release_please_workflow.py` pins both rules and the
+  exact steps, so a new step is a reviewed change to that test.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary
