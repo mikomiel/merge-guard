@@ -138,6 +138,13 @@ python3 scripts/release_manifest.py check
 Do not edit a digest or a size by hand: the check compares the manifest with the
 committed blobs, and a hand edit fails it with the file named.
 
+To read a commit that is not checked out, pass `--commit REV` before any paths.
+`check --commit REV` runs the same check on that commit. `write --commit REV`
+prints the regenerated manifest on standard output and writes no file. Both take
+the declared manifest, the tree and every blob from that commit, and nothing of
+it reaches the working tree. The release workflow uses this on the release
+branch. A person rarely needs it.
+
 A change to any closure file changes its digest, so the same pull request
 regenerates the manifest, as its own commit. Two cases are easy to miss:
 
@@ -145,22 +152,24 @@ regenerates the manifest, as its own commit. Two cases are easy to miss:
 - **Every release pull request.** Release Please bumps `__version__` in
   `merge_guard/__init__.py`, and that file is in the closure, so its digest
   changes with the version. The workflow `.github/workflows/release-please.yml`
-  regenerates the manifest, so nobody runs `write` by hand for this. It runs
-  three jobs in order. The first runs the Release Please action and names the
-  open release branch. The second checks out that branch, runs `write` with no
-  arguments, then `check`, and reports the head it read and the new manifest. It
-  references no secret, because it runs repository code. The third holds the token and
-  runs no file of its checkout. It checks that report, commits
-  `release-manifest.json` alone as `chore(release): regenerate the release
-  manifest` and pushes it, only when the manifest changed. When Release Please
-  updates the pull request it rewrites the branch and drops that commit, and the
-  same run regenerates it. A run on a branch that is already correct commits
-  nothing. The first `checks` run on a head that Release Please has just written
-  fails and names `merge_guard/__init__.py`; the run for the regeneration commit
-  is the one that counts, and that head needs its own review. If the third job
-  fails, for example because the branch moved while the jobs ran, run the
-  `release-please` workflow again with `workflow_dispatch`: it regenerates only
-  when the manifest is stale.
+  regenerates the manifest, so nobody runs `write` by hand for this. It is one
+  job. It runs the Release Please action, finds the open release pull request,
+  and checks out the default branch only. The release branch is data: the job
+  fetches that one ref and never checks it out. It runs `write --commit` from
+  the default branch, which reads the closure files and the declared manifest
+  from the fetched commit and prints the new manifest. The job builds a commit
+  on top of the fetched head with git plumbing, `release-manifest.json` alone,
+  as `chore(release): regenerate the release manifest`, and runs `check
+  --commit` on it. The last step holds the token and sends the commit as a plain
+  push, never a forced one. When Release Please updates the pull request it
+  rewrites the branch and drops that commit, and the same run regenerates it. A
+  run on a branch that is already correct commits nothing. The first `checks`
+  run on a head that Release Please has just written fails and names
+  `merge_guard/__init__.py`; the run for the regeneration commit is the one that
+  counts, and that head needs its own review. If the push fails, for example
+  because the branch moved after the fetch, run the `release-please` workflow
+  again with `workflow_dispatch` on the default branch: it regenerates only when
+  the manifest is stale.
 
 ## What the pin guarantees
 

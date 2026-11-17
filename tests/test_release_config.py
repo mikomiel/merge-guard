@@ -53,16 +53,13 @@ def _yaml(path: Path) -> dict:
 
 
 def _release_step(job: dict) -> dict:
-    """The release-please action step: the first of the job's two steps.
+    """The release-please action step: the first step of the job.
 
-    The job runs the action and then looks up the open release pull request. It
-    runs nothing else. The regeneration of the release manifest is in two other
-    jobs (tests/test_release_please_workflow.py), so this job holds the token and
-    runs no repository code. Unpacking exactly two steps keeps that true here
-    too: a third step fails this test.
+    The steps after it regenerate the release manifest on the release branch.
+    tests/test_release_please_workflow.py pins all of them.
     """
-    action, lookup = job["steps"]
-    assert (action.get("id"), lookup.get("id")) == ("release", "target")
+    action = job["steps"][0]
+    assert action.get("id") == "release"
     return action
 
 
@@ -92,10 +89,9 @@ def test_the_manifest_version_and_the_project_version_move_together():
 def test_the_workflow_uses_the_token_that_can_trigger_checks():
     workflow = _workflow()
     # The personal access token makes every write, so the default token has no
-    # write grant. It has none at the workflow level, and the one job that
-    # lists the open pull requests has that read.
+    # write grant: none at the workflow level, and only reads on the job.
     assert workflow["permissions"] == {}
-    assert workflow["jobs"]["release-please"]["permissions"] == {"pull-requests": "read"}
+    assert set(workflow["jobs"]["release-please"]["permissions"].values()) == {"read"}
     step = _release_step(workflow["jobs"]["release-please"])
     assert PINNED_ACTION.fullmatch(step["uses"])
     assert step["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"

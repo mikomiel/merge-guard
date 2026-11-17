@@ -14,59 +14,36 @@
 #
 # The token is a fine-grained personal access token with Contents: write and
 # Pull requests: write on this repository, stored as RELEASE_PLEASE_TOKEN. The
-# default GITHUB_TOKEN cannot be used: a pull request it creates does not
-# trigger the pull-request workflows, so the required checks would never run.
-# A push made with GITHUB_TOKEN has the same defect: it starts no pull-request
-# workflow, so `checks` would never run on the new head and the pull request
-# could not merge. The push of the regenerated manifest therefore uses the
-# personal access token too.
+# default GITHUB_TOKEN cannot be used: a pull request it creates, or a push it
+# makes, starts no pull-request workflow, so `checks` would never run on the new
+# head and the pull request could not merge.
 #
-# Every release pull request changes __version__ in merge_guard/__init__.py.
-# That file is in the release closure, so `checks` fails on the pull request
-# until release-manifest.json is regenerated. Three jobs do it, and no person
-# takes part. They run on every workflow run while a release pull request is
-# open, because release-please rewrites (force-pushes) the branch whenever it
+# Every release pull request changes __version__ in merge_guard/__init__.py, a
+# file of the release closure, so `checks` fails on it until release-manifest.json
+# is regenerated. This one job does that on every run while a release pull
+# request is open, because release-please force-pushes the branch whenever it
 # updates the pull request:
 #
-# 1. `release-please` runs the action. Its `target` step then finds the open
-#    release pull request. The action sets its `pr` output only in a run that
-#    created or updated the pull request, and release-please rewrites the
-#    branch in exactly that case. A run that finds the pull request unchanged
-#    sets nothing, so a re-run after a failed push, and a manual dispatch,
-#    would repair nothing. When `pr` is not set, `target` reads the open pull
-#    requests instead. The job reports the release branch, or an empty name
-#    when no release pull request is open.
-# 2. `regenerate` checks out that branch and runs `scripts/release_manifest.py
-#    write`. This is repository code, so the job references no secret and
-#    stores no credential. It commits the result on a local copy to run `check`
-#    on it, and it never pushes. It reports the head it read and the bytes of
-#    the new manifest. When `write` changes nothing, it reports `changed=false`
-#    and job 3 does not run, so a second run sends nothing.
-# 3. `push` holds RELEASE_PLEASE_TOKEN and runs no file of its checkout. The two
-#    values from job 2 are data from a job that ran repository code, so its
-#    `commit` step refuses a head that is not the checked-out head, bytes that
-#    are not base64 or are too long or are not a JSON object, and a manifest
-#    path that is not a regular file. Then it commits release-manifest.json
-#    alone, as the bot. Only its `push` step holds the token. That step sends
-#    the commit as a plain push, never a forced one, so a release branch that
-#    moved in the meantime rejects it and the workflow fails. Run it again.
+# 1. `release` runs the action. `target` finds the open release pull request. The
+#    action sets its `pr` output only in a run that created or updated it, so a
+#    re-run after a failed push, and a manual dispatch, read the open pull
+#    requests instead.
+# 2. `commit` fetches that one branch and builds the regenerated manifest as one
+#    commit on top of its head. The job checks out the default branch and nothing
+#    else, so the only code that runs is code that review has seen. The release
+#    branch is data: it is never checked out, `release_manifest.py write --commit`
+#    reads its files through git, and git plumbing builds the commit. When the
+#    manifest is already right it builds nothing.
+# 3. `push` is the only step besides the action that holds RELEASE_PLEASE_TOKEN.
+#    It sends the commit as a plain push, never a forced one, so a branch that
+#    moved in the meantime rejects it. Run the workflow again.
 #
-# The jobs are separate because the steps of one job share one runner. A step can
-# change the PATH, the environment and the git configuration that the later
-# steps use, so a step that runs repository code could take a token that a later
-# step holds. Each job has its own runner, and the personal access token never
-# reaches job 2.
-#
-# This does not make job 2 harmless. Every job has the read-only job token, which
-# reads nothing that this public repository does not already show. And job 3
-# takes data from job 2. The most that data can do is change
-# release-manifest.json on the release branch, and `checks` runs in full on that
-# new head.
-#
-# The first `checks` run on a head that release-please has just written fails
-# and names the stale file. The commit from job 3 replaces that head, and the
-# run for it is the one that counts. If job 3 fails, run this workflow again:
-# it regenerates only when the manifest is stale.
+# The steps of one job share one runner, so no step that reads what the release
+# branch holds may hold the token. The checkout has no `ref`, so it is the ref
+# that started the run: dispatch this workflow on the default branch. The fetch
+# is anonymous because this repository is public. The first `checks` run on a
+# head that release-please has just written fails and names the stale file; the
+# run for the pushed commit is the one that counts.
 name: release-please
 
 on:
@@ -75,7 +52,7 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# No grant by default. Each job asks for the one read it needs, and the personal
+# No grant by default. The job asks for the two reads it needs, and the personal
 # access token makes every write.
 permissions: {}
 
@@ -90,12 +67,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      # `target` lists the open pull requests with the job token. The action
-      # makes its own calls with the personal access token.
+      # The checkout of the default branch, and the list of open pull requests
+      # that `target` reads with the job token. The action makes its own calls
+      # with the personal access token.
+      contents: read
       pull-requests: read
-    outputs:
-      # The release branch, or an empty value when no release pull request is open.
-      branch: ${{ steps.target.outputs.branch }}
     steps:
       - id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
@@ -139,145 +115,60 @@ jobs:
           fi
           echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
 
-  regenerate:
-    # Runs repository code, so this job references no secret.
-    needs: release-please
-    if: needs.release-please.outputs.branch != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      # The checkout of the release branch.
-      contents: read
-    outputs:
-      # "true" only when `write` changed the manifest. The other two values are
-      # set only then: the head that `write` read, and the new manifest as base64.
-      changed: ${{ steps.regenerate.outputs.changed }}
-      head: ${{ steps.regenerate.outputs.head }}
-      manifest: ${{ steps.regenerate.outputs.manifest }}
-    steps:
+      # No `ref`, no `repository` and no stored credential: this is the only
+      # checkout, and it is code that review has seen.
       - id: checkout
-        name: Check out the release branch
+        name: Check out the default branch
+        if: steps.target.outputs.branch != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.branch }}
-          persist-credentials: false
-
-      - id: regenerate
-        name: Regenerate the release manifest
-        shell: bash
-        env:
-          # For the local commit below, which is never pushed.
-          GIT_AUTHOR_NAME: "github-actions[bot]"
-          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
-          GIT_COMMITTER_NAME: "github-actions[bot]"
-          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
-        run: |
-          release_head="$(git rev-parse HEAD)"
-          python3 scripts/release_manifest.py write
-          if git diff --quiet -- release-manifest.json; then
-            echo "The release manifest already matches the release branch."
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          git --no-pager diff --stat -- release-manifest.json
-          # `check` compares the manifest with the committed blobs, so it needs a
-          # commit. This one stays on this runner. The next job makes its own.
-          git commit --quiet -m "Check the regenerated manifest" -- release-manifest.json
-          python3 scripts/release_manifest.py check
-          manifest="$(git cat-file blob HEAD:release-manifest.json | base64 | tr -d '\n')"
-          {
-            echo "changed=true"
-            echo "head=${release_head}"
-            echo "manifest=${manifest}"
-          } >> "${GITHUB_OUTPUT}"
-
-  push:
-    # Holds the personal access token, so this job runs no file of its checkout.
-    needs: [release-please, regenerate]
-    if: needs.regenerate.outputs.changed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      # The checkout of the release branch. The personal access token makes the push.
-      contents: read
-    steps:
-      - id: checkout
-        name: Check out the release branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: ${{ needs.release-please.outputs.branch }}
           persist-credentials: false
 
       - id: commit
-        name: Commit the regenerated manifest
+        name: Build the regenerated manifest commit
+        if: steps.target.outputs.branch != ''
         shell: bash
         env:
-          # Data from the job that ran repository code: checked below, never run.
-          REGENERATED_FROM: ${{ needs.regenerate.outputs.head }}
-          MANIFEST: ${{ needs.regenerate.outputs.manifest }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          GIT_TERMINAL_PROMPT: "0"
           GIT_AUTHOR_NAME: "github-actions[bot]"
           GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
         run: |
-          hash_pattern='^[0-9a-f]{40}$'
-          if [[ ! "${REGENERATED_FROM}" =~ ${hash_pattern} ]]; then
-            echo "::error::The regenerate job did not report a full commit hash."
-            exit 1
-          fi
-          if [ "$(git rev-parse HEAD)" != "${REGENERATED_FROM}" ]; then
-            echo "::error::The release branch moved after the manifest was generated. Run this workflow again."
-            exit 1
-          fi
-          base64_pattern='^[A-Za-z0-9+/]+={0,2}$'
-          if [ "${#MANIFEST}" -gt 65536 ] || [[ ! "${MANIFEST}" =~ ${base64_pattern} ]]; then
-            echo "::error::The regenerate job did not report a manifest in the expected form."
-            exit 1
-          fi
-          decoded="$(mktemp)"
-          if ! printf '%s' "${MANIFEST}" | base64 -d > "${decoded}"; then
-            echo "::error::The reported manifest is not valid base64."
-            exit 1
-          fi
-          if ! jq -e 'type == "object" and (.files | type == "object")' "${decoded}" > /dev/null; then
-            echo "::error::The reported manifest is not a JSON object with a files object."
-            exit 1
-          fi
-          # The bytes go to one path. Refuse it unless it is a regular file of the
-          # commit: a link there would send them to another file.
-          entry="$(git ls-tree HEAD -- release-manifest.json)"
-          mode="${entry%% *}"
-          if [ -L release-manifest.json ] || { [ "${mode}" != "100644" ] && [ "${mode}" != "100755" ]; }; then
-            echo "::error::release-manifest.json is not a regular file of the release branch."
-            exit 1
-          fi
-          cat "${decoded}" > release-manifest.json
-          if git diff --quiet -- release-manifest.json; then
-            echo "The release branch already carries this manifest: nothing to push."
-            echo "committed=false" >> "${GITHUB_OUTPUT}"
+          # The release branch is data. Fetch its head into the object store and
+          # read it through git; nothing of it reaches the working tree.
+          git fetch --quiet --no-tags --depth=1 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "refs/heads/${BRANCH}"
+          tip="$(git rev-parse --verify "FETCH_HEAD^{commit}")"
+          blob="$(python3 scripts/release_manifest.py write --commit "${tip}" | git hash-object -w --no-filters --stdin)"
+          if [ "${blob}" = "$(git rev-parse "${tip}:release-manifest.json")" ]; then
+            echo "The release branch already carries the manifest it needs: nothing to push."
             exit 0
           fi
-          git --no-pager diff --stat -- release-manifest.json
-          git -c core.hooksPath=/dev/null commit --quiet \
+          # The tree is the fetched head's tree with one entry replaced, built in
+          # a temporary index so the working tree and the real index stay as they are.
+          mode="$(git ls-tree "${tip}" release-manifest.json | cut -d' ' -f1)"
+          GIT_INDEX_FILE="${RUNNER_TEMP}/release-index"
+          export GIT_INDEX_FILE
+          git read-tree "${tip}"
+          git update-index --cacheinfo "${mode},${blob},release-manifest.json"
+          commit="$(git commit-tree "$(git write-tree)" -p "${tip}" \
             -m "chore(release): regenerate the release manifest" \
-            -m "release-please changed a file of the release closure, so the digests in release-manifest.json were stale. The release-please workflow regenerated them." \
-            -- release-manifest.json
-          echo "committed=true" >> "${GITHUB_OUTPUT}"
+            -m "release-please changed a file of the release closure, so the digests in release-manifest.json were stale. The release-please workflow regenerated them.")"
+          python3 scripts/release_manifest.py check --commit "${commit}"
+          git --no-pager diff --stat "${tip}" "${commit}"
+          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
 
       - id: push
         name: Push the regenerated manifest
-        if: steps.commit.outputs.committed == 'true'
+        if: steps.commit.outputs.commit != ''
         shell: bash
         env:
           RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          BRANCH: ${{ needs.release-please.outputs.branch }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
-          pattern='^release-please--branches--[A-Za-z0-9._/-]+$'
-          if [[ ! "${BRANCH}" =~ ${pattern} || "${BRANCH}" == *..* ]]; then
-            echo "::error::Refusing to push to a branch that is not a release-please branch."
-            exit 1
-          fi
           # Single quotes on purpose: the token expands when git runs the helper,
           # so it is in no command line and no git config file.
           # shellcheck disable=SC2016
@@ -285,4 +176,4 @@ jobs:
           # An empty value first drops every other helper. The key then limits
           # this one to the server of this repository.
           git -c core.hooksPath=/dev/null -c credential.helper= -c "credential.${GITHUB_SERVER_URL}.helper=${helper}" \
-            push "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
+            push "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "${COMMIT}:refs/heads/${BRANCH}"

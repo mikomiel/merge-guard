@@ -75,12 +75,14 @@ python -m pytest -q
   the release branch and pushes one commit when the manifest changed
   (`docs/pin-bump.md`): no one regenerates it by hand. Do not tag by hand and
   never move a published tag.
-- In that workflow the personal access token and repository code never share a
-  job, because the steps of one job share a runner. The job that runs
-  `scripts/release_manifest.py` references no secret. The job that holds the
-  token and pushes runs no file of its checkout and treats what the regenerating
-  job reported as data. `tests/test_release_please_workflow.py` pins both rules and
-  the exact steps of every job, so a new step is a reviewed change to that test.
+- In that workflow the release branch is data, never code. The job checks out
+  the default branch only, fetches the release branch as one ref without a
+  checkout, and reads its files with `scripts/release_manifest.py write --commit`,
+  so the only code that runs is code that review has seen. The personal access
+  token is in the release-please action and in the push step alone: the steps of
+  one job share a runner, so no step that reads what the release branch holds
+  may hold it. `tests/test_release_please_workflow.py` pins both rules and the
+  exact steps, so a new step is a reviewed change to that test.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary

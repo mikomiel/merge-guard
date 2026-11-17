@@ -23,6 +23,14 @@ that file's digest, and the manifest is regenerated on the release branch.
 commit a tag can point at. ``write`` regenerates the digests from the same
 commit, so commit a closure change before regenerating the manifest; the closure
 set itself is a release decision and stays a deliberate edit of this manifest.
+
+Both read the checked-out HEAD and its working-tree manifest by default.
+``--commit REV`` reads commit REV from the object database instead: the declared
+manifest, the tree and every blob come from that commit, and nothing of it
+reaches the working tree. ``check --commit REV`` runs the same check.
+``write --commit REV`` prints the regenerated manifest on standard output and
+writes no file, so a workflow can commit it to a branch that it fetched but never
+checked out.
 """
 
 from __future__ import annotations
@@ -60,8 +68,8 @@ def _finding(relative: str, message: str) -> str:
     return f"{relative}: {message}"
 
 
-def _closure_problem(root: Path, relative: str) -> str | None:
-    """Refuse a closure path that escapes *root* or is not a plain file on disk."""
+def _path_problem(relative: str) -> str | None:
+    """Refuse a closure path that is not a normalised repository-relative path."""
     if not relative or relative != relative.strip():
         return "path is empty or padded with whitespace"
     candidate = PurePosixPath(relative)
@@ -77,6 +85,15 @@ def _closure_problem(root: Path, relative: str) -> str | None:
         return "path is not in normalised repository-relative form"
     if relative == MANIFEST_NAME:
         return "the manifest never lists itself"
+    return None
+
+
+def _closure_problem(root: Path, relative: str) -> str | None:
+    """Refuse a closure path that escapes *root* or is not a plain file on disk."""
+    problem = _path_problem(relative)
+    if problem is not None:
+        return problem
+    candidate = PurePosixPath(relative)
     current = root
     try:
         for part in candidate.parts[:-1]:
@@ -103,8 +120,10 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return seen
 
 
-def _tree_entries(root: Path) -> tuple[dict[str, tuple[str, str]] | None, str | None]:
-    """Map every path in the checked-out commit to its Git mode and blob id.
+def _tree_entries(
+    root: Path, rev: str = "HEAD"
+) -> tuple[dict[str, tuple[str, str]] | None, str | None]:
+    """Map every path in commit *rev* (the checked-out HEAD) to its mode and blob id.
 
     A closure names files a consumer extracts from the tag, so presence in the
     checkout is not enough: repository metadata, an untracked file and a
@@ -112,7 +131,7 @@ def _tree_entries(root: Path) -> tuple[dict[str, tuple[str, str]] | None, str | 
     """
     try:
         completed = subprocess.run(
-            ["git", "-C", str(root), "ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+            ["git", "-C", str(root), "ls-tree", "-r", "-z", "--full-tree", rev],
             capture_output=True,
             check=False,
         )
@@ -120,7 +139,7 @@ def _tree_entries(root: Path) -> tuple[dict[str, tuple[str, str]] | None, str | 
         return None, f"git is unavailable: {exc}"
     if completed.returncode != 0:
         message = completed.stderr.decode("utf-8", "replace").strip()
-        return None, f"not a git checkout with a readable HEAD: {message}"
+        return None, f"not a git checkout with a readable {rev}: {message}"
     entries: dict[str, tuple[str, str]] = {}
     for record in completed.stdout.split(b"\0"):
         if not record:
@@ -136,23 +155,19 @@ def _tree_entries(root: Path) -> tuple[dict[str, tuple[str, str]] | None, str | 
     return entries, None
 
 
-def _tree_finding(entries: dict[str, tuple[str, str]], relative: str) -> str | None:
+def _tree_finding(
+    entries: dict[str, tuple[str, str]], relative: str, rev: str = "HEAD"
+) -> str | None:
     entry = entries.get(relative)
     if entry is None:
-        return "path is not tracked in HEAD"
+        return f"path is not tracked in {rev}"
     mode, _oid = entry
     if mode not in {"100644", "100755"}:
-        return f"path is not a regular file in HEAD (mode {mode})"
+        return f"path is not a regular file in {rev} (mode {mode})"
     return None
 
 
-def _blob_digest(root: Path, oid: str) -> tuple[tuple[str, int] | None, str | None]:
-    """Digest the committed blob, never the possibly converted checkout bytes.
-
-    A checkout can differ from the commit by design -- ``.gitattributes`` with
-    ``eol=crlf`` rewrites the working tree -- so hashing the file would publish
-    digests a consumer cannot reproduce from the tag.
-    """
+def _blob(root: Path, oid: str) -> tuple[bytes | None, str | None]:
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), "cat-file", "blob", oid],
@@ -164,7 +179,36 @@ def _blob_digest(root: Path, oid: str) -> tuple[tuple[str, int] | None, str | No
     if completed.returncode != 0:
         message = completed.stderr.decode("utf-8", "replace").strip()
         return None, f"cannot read the committed blob: {message}"
-    return (hashlib.sha256(completed.stdout).hexdigest(), len(completed.stdout)), None
+    return completed.stdout, None
+
+
+def _blob_digest(root: Path, oid: str) -> tuple[tuple[str, int] | None, str | None]:
+    """Digest the committed blob, never the possibly converted checkout bytes.
+
+    A checkout can differ from the commit by design -- ``.gitattributes`` with
+    ``eol=crlf`` rewrites the working tree -- so hashing the file would publish
+    digests a consumer cannot reproduce from the tag.
+    """
+    data, problem = _blob(root, oid)
+    if data is None:
+        return None, problem
+    return (hashlib.sha256(data).hexdigest(), len(data)), None
+
+
+def _parse(raw: bytes) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, [_finding(MANIFEST_NAME, f"not valid UTF-8: {exc}")]
+    try:
+        manifest = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except json.JSONDecodeError as exc:
+        return None, [_finding(MANIFEST_NAME, f"not valid JSON: {exc}")]
+    except ValueError as exc:
+        return None, [_finding(MANIFEST_NAME, f"invalid JSON object: {exc}")]
+    if not isinstance(manifest, dict):
+        return None, [_finding(MANIFEST_NAME, "must be a JSON object")]
+    return manifest, []
 
 
 def _load(root: Path) -> tuple[dict[str, Any] | None, bytes, list[str]]:
@@ -175,19 +219,25 @@ def _load(root: Path) -> tuple[dict[str, Any] | None, bytes, list[str]]:
         raw = path.read_bytes()
     except OSError as exc:
         return None, b"", [_finding(MANIFEST_NAME, f"missing or unreadable: {exc}")]
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        return None, b"", [_finding(MANIFEST_NAME, f"not valid UTF-8: {exc}")]
-    try:
-        manifest = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
-    except json.JSONDecodeError as exc:
-        return None, b"", [_finding(MANIFEST_NAME, f"not valid JSON: {exc}")]
-    except ValueError as exc:
-        return None, b"", [_finding(MANIFEST_NAME, f"invalid JSON object: {exc}")]
-    if not isinstance(manifest, dict):
-        return None, b"", [_finding(MANIFEST_NAME, "must be a JSON object")]
-    return manifest, raw, []
+    manifest, findings = _parse(raw)
+    return manifest, raw, findings
+
+
+def _committed(
+    root: Path, rev: str
+) -> tuple[dict[str, Any] | None, dict[str, tuple[str, str]], list[str]]:
+    """Read the declared manifest and the tree of commit *rev*, not the working tree."""
+    entries, problem = _tree_entries(root, rev)
+    if entries is None:
+        return None, {}, [_finding(MANIFEST_NAME, problem or "no tree")]
+    problem = _tree_finding(entries, MANIFEST_NAME, rev)
+    if problem is not None:
+        return None, entries, [_finding(MANIFEST_NAME, problem)]
+    raw, problem = _blob(root, entries[MANIFEST_NAME][1])
+    if raw is None:
+        return None, entries, [_finding(MANIFEST_NAME, problem or "blob is unreadable")]
+    manifest, findings = _parse(raw)
+    return manifest, entries, findings
 
 
 def _validate_structure(manifest: dict[str, Any]) -> list[str]:
@@ -236,10 +286,30 @@ def _manifest_self_problem(
     return None
 
 
+def _closure_blob(
+    root: Path, entries: dict[str, tuple[str, str]], relative: str, rev: str | None
+) -> tuple[tuple[str, int] | None, str | None]:
+    """Digest the committed blob of one closure path, or say why it cannot be.
+
+    Commit *rev* has no working tree to inspect, so only the form of the path and
+    its entry in the tree are checked then.
+    """
+    problem = _path_problem(relative) if rev else _closure_problem(root, relative)
+    if problem is None:
+        problem = _tree_finding(entries, relative, rev or "HEAD")
+    if problem is not None:
+        return None, problem
+    blob, problem = _blob_digest(root, entries[relative][1])
+    if blob is None:
+        return None, problem or "blob is unreadable"
+    return blob, None
+
+
 def _declaration_findings(
     manifest: dict[str, Any],
     root: Path,
     entries: dict[str, tuple[str, str]],
+    rev: str | None = None,
 ) -> list[str]:
     findings: list[str] = []
     files = manifest.get("files")
@@ -263,18 +333,9 @@ def _declaration_findings(
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             findings.append(_finding(relative, "'bytes' is not a non-negative integer"))
             continue
-        problem = _closure_problem(root, relative)
-        if problem is not None:
-            findings.append(_finding(relative, problem))
-            continue
-        tree_finding = _tree_finding(entries, relative)
-        if tree_finding is not None:
-            findings.append(_finding(relative, tree_finding))
-            continue
-        _mode, oid = entries[relative]
-        blob, blob_problem = _blob_digest(root, oid)
+        blob, problem = _closure_blob(root, entries, relative, rev)
         if blob is None:
-            findings.append(_finding(relative, blob_problem or "blob is unreadable"))
+            findings.append(_finding(relative, problem or "blob is unreadable"))
             continue
         actual, actual_size = blob
         if actual_size != size:
@@ -314,6 +375,60 @@ def check(root: Path) -> list[str]:
     return findings + _declaration_findings(manifest, root, entries)
 
 
+def check_commit(root: Path, rev: str) -> list[str]:
+    """Like ``check``, for commit *rev* read from the object database."""
+    manifest, entries, findings = _committed(root, rev)
+    if manifest is None:
+        return findings
+    findings += _validate_structure(manifest)
+    if not isinstance(manifest.get("files"), dict):
+        return findings
+    return findings + _declaration_findings(manifest, root, entries, rev)
+
+
+def _regenerate(
+    manifest: dict[str, Any],
+    root: Path,
+    entries: dict[str, tuple[str, str]],
+    paths: list[str] | None,
+    rev: str | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Return *manifest* with fresh digests, or the findings that refuse them."""
+    closure = sorted(paths) if paths else sorted(manifest["files"])
+    findings: list[str] = []
+    replaced: dict[str, dict[str, Any]] = {}
+    for relative in closure:
+        blob, problem = _closure_blob(root, entries, relative, rev)
+        if blob is None:
+            findings.append(_finding(relative, problem or "blob is unreadable"))
+            continue
+        actual, size = blob
+        replaced[relative] = {"sha256": actual, "bytes": size}
+    if findings:
+        return None, findings
+
+    for entrypoint in manifest["entrypoints"]:
+        if entrypoint not in replaced:
+            return None, [
+                _finding(
+                    entrypoint,
+                    "would leave the closure, but is still an entrypoint; "
+                    f"edit 'entrypoints' in {MANIFEST_NAME} first",
+                )
+            ]
+
+    updated = dict(manifest)
+    updated["files"] = replaced
+    problems = _declaration_findings(updated, root, entries, rev)
+    if problems:
+        return None, problems
+    return updated, []
+
+
+def _dump(manifest: dict[str, Any]) -> str:
+    return json.dumps(manifest, indent=2, sort_keys=False) + "\n"
+
+
 def write(root: Path, paths: list[str] | None = None) -> list[str]:
     """Regenerate the manifest; *paths* replaces the closure when given.
 
@@ -327,8 +442,6 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     findings += _validate_structure(manifest)
     if findings:
         return findings
-    files = manifest["files"]
-    closure = sorted(paths) if paths else sorted(files)
 
     entries, tree_problem = _tree_entries(root)
     if entries is None:
@@ -337,41 +450,9 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     if self_problem is not None:
         return [_finding(MANIFEST_NAME, self_problem)]
 
-    replaced: dict[str, dict[str, Any]] = {}
-    for relative in closure:
-        problem = _closure_problem(root, relative)
-        if problem is not None:
-            findings.append(_finding(relative, problem))
-            continue
-        tree_finding = _tree_finding(entries, relative)
-        if tree_finding is not None:
-            findings.append(_finding(relative, tree_finding))
-            continue
-        _mode, oid = entries[relative]
-        blob, blob_problem = _blob_digest(root, oid)
-        if blob is None:
-            findings.append(_finding(relative, blob_problem or "blob is unreadable"))
-            continue
-        actual, size = blob
-        replaced[relative] = {"sha256": actual, "bytes": size}
-    if findings:
+    updated, findings = _regenerate(manifest, root, entries, paths)
+    if updated is None:
         return findings
-
-    for entrypoint in manifest["entrypoints"]:
-        if entrypoint not in replaced:
-            return [
-                _finding(
-                    entrypoint,
-                    "would leave the closure, but is still an entrypoint; "
-                    f"edit 'entrypoints' in {MANIFEST_NAME} first",
-                )
-            ]
-
-    updated = dict(manifest)
-    updated["files"] = replaced
-    problems = _declaration_findings(updated, root, entries)
-    if problems:
-        return problems
     mode = (root / MANIFEST_NAME).stat().st_mode & 0o777
     descriptor, temporary_name = tempfile.mkstemp(
         dir=root, prefix=f".{MANIFEST_NAME}.", suffix=".tmp"
@@ -379,12 +460,29 @@ def write(root: Path, paths: list[str] | None = None) -> list[str]:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(updated, indent=2, sort_keys=False) + "\n")
+            handle.write(_dump(updated))
         os.chmod(temporary, mode)
         os.replace(temporary, root / MANIFEST_NAME)
     finally:
         temporary.unlink(missing_ok=True)
     return []
+
+
+def render(
+    root: Path, paths: list[str] | None, rev: str
+) -> tuple[str | None, list[str]]:
+    """Return the manifest regenerated from commit *rev*, or the findings.
+
+    The declarations and every blob come from the commit, and nothing is written.
+    """
+    manifest, entries, findings = _committed(root, rev)
+    if manifest is None:
+        return None, findings
+    findings += _validate_structure(manifest)
+    if findings:
+        return None, findings
+    updated, findings = _regenerate(manifest, root, entries, paths, rev)
+    return (None if updated is None else _dump(updated)), findings
 
 
 def main(argv: list[str]) -> int:
@@ -397,11 +495,24 @@ def main(argv: list[str]) -> int:
     elif rest:
         print(f"unknown action: {rest[0]}", file=sys.stderr)
         return 2
+    rev = None
+    if rest[:1] == ["--commit"]:
+        if len(rest) < 2 or rest[1].startswith("-"):
+            print("--commit needs a revision", file=sys.stderr)
+            return 2
+        rev, rest = rest[1], rest[2:]
     if action == "check" and rest:
         print("check takes no paths", file=sys.stderr)
         return 2
 
-    findings = check(root) if action == "check" else write(root, rest)
+    if rev is None:
+        findings = check(root) if action == "check" else write(root, rest)
+    elif action == "check":
+        findings = check_commit(root, rev)
+    else:
+        text, findings = render(root, rest, rev)
+        if text is not None:
+            sys.stdout.write(text)
     for finding in findings:
         print(finding, file=sys.stderr)
     return 1 if findings else 0
