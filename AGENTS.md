@@ -69,10 +69,18 @@ python -m pytest -q
   no entry. Extending the closure further is a release decision, so the file
   stays outside the ordinary allowlist.
 - Release Please owns the version, the changelog and the tag. One release pull
-  request bumps `pyproject.toml` and `merge_guard/__init__.py` together; a
-  person merges it, after regenerating `release-manifest.json` on that branch
-  because `merge_guard/__init__.py` is in the closure (`docs/pin-bump.md`). Do
-  not tag by hand and never move a published tag.
+  request bumps `pyproject.toml` and `merge_guard/__init__.py` together, and a
+  person merges it. `merge_guard/__init__.py` is in the closure, so
+  `.github/workflows/release-please.yml` regenerates `release-manifest.json` on
+  the release branch and pushes one commit when the manifest changed
+  (`docs/pin-bump.md`): no one regenerates it by hand. Do not tag by hand and
+  never move a published tag.
+- In that workflow the personal access token and repository code never share a
+  job, because the steps of one job share a runner. The job that runs
+  `scripts/release_manifest.py` references no secret. The job that holds the
+  token and pushes runs no file of its checkout and treats what the regenerating
+  job reported as data. `tests/test_release_please_workflow.py` pins both rules and
+  the exact steps of every job, so a new step is a reviewed change to that test.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary

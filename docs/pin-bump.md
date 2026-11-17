@@ -144,11 +144,23 @@ regenerates the manifest, as its own commit. Two cases are easy to miss:
 - **A new package file.** The test above fails until the file has an entry.
 - **Every release pull request.** Release Please bumps `__version__` in
   `merge_guard/__init__.py`, and that file is in the closure, so its digest
-  changes with the version. The `checks` run on the release pull request fails
-  and names `merge_guard/__init__.py` until a maintainer runs `write` with no
-  arguments on the release branch and commits the manifest. If Release Please
-  updates the branch afterwards, regenerate again: the check names the stale
-  file. The new head needs its own CI run and its own review.
+  changes with the version. The workflow `.github/workflows/release-please.yml`
+  regenerates the manifest, so nobody runs `write` by hand for this. It runs
+  three jobs in order. The first runs the Release Please action and names the
+  open release branch. The second checks out that branch, runs `write` with no
+  arguments, then `check`, and reports the head it read and the new manifest. It
+  references no secret, because it runs repository code. The third holds the token and
+  runs no file of its checkout. It checks that report, commits
+  `release-manifest.json` alone as `chore(release): regenerate the release
+  manifest` and pushes it, only when the manifest changed. When Release Please
+  updates the pull request it rewrites the branch and drops that commit, and the
+  same run regenerates it. A run on a branch that is already correct commits
+  nothing. The first `checks` run on a head that Release Please has just written
+  fails and names `merge_guard/__init__.py`; the run for the regeneration commit
+  is the one that counts, and that head needs its own review. If the third job
+  fails, for example because the branch moved while the jobs ran, run the
+  `release-please` workflow again with `workflow_dispatch`: it regenerates only
+  when the manifest is stale.
 
 ## What the pin guarantees
 
