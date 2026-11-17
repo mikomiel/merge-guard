@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/mikomiel/merge-guard/compare/v0.2.1...v0.3.0) (2026-11-17)
+
+
+### Features
+
+* **release:** cover the merge_guard package in the release closure ([#67](https://github.com/mikomiel/merge-guard/issues/67)) ([2a92e75](https://github.com/mikomiel/merge-guard/commit/2a92e75a54a22f876cd1c6ca3dc44040c8b5ff44))
+
 ## [0.2.1](https://github.com/mikomiel/merge-guard/compare/v0.2.0...v0.2.1) (2026-11-16)
 
 
