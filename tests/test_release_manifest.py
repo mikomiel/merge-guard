@@ -5,6 +5,10 @@ repository's own manifest matches its tree, and a tree that drifts is named file
 by file rather than accepted. The write path is pinned too, because a generator
 that silently drops an entrypoint would publish a closure that no longer holds
 what a consumer imports.
+
+The closure also covers the whole ``merge_guard/`` package. A file committed
+there without a manifest entry is named, so a package file can never be released
+outside the closure.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import pytest
 from scripts import release_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = "merge_guard/"
 
 
 def _commit(root: Path, *paths: str) -> None:
@@ -79,8 +84,85 @@ def _rewrite(root: Path, manifest: dict) -> None:
     _commit(root, release_manifest.MANIFEST_NAME)
 
 
+def _unlisted_package_files(root: Path) -> list[str]:
+    """The files under the package in the commit at HEAD that the manifest omits.
+
+    The tree is the commit, the same one ``check`` reads. A walk of the disk would
+    count ``__pycache__`` and files nobody committed. There is no suffix filter:
+    a data file in the package is released like a module.
+    """
+    entries, problem = release_manifest._tree_entries(root)
+    assert entries is not None, problem
+    listed = set(_manifest(root)["files"])
+    return sorted(
+        path for path in entries if path.startswith(PACKAGE) and path not in listed
+    )
+
+
+def _package_repo(tmp_path: Path) -> Path:
+    """A repository whose package holds two committed files and lists only one."""
+    root = _repo(tmp_path)
+    package = root / "merge_guard"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "extra.py").write_text("print('extra')\n", encoding="utf-8")
+    _commit(root)
+    digest, size = release_manifest.digest(package / "__init__.py")
+    manifest = _manifest(root)
+    manifest["files"]["merge_guard/__init__.py"] = {"sha256": digest, "bytes": size}
+    _rewrite(root, manifest)
+    return root
+
+
 def test_the_repository_manifest_matches_the_tree():
     assert release_manifest.check(ROOT) == []
+
+
+def test_every_package_file_is_in_the_closure():
+    unlisted = _unlisted_package_files(ROOT)
+    assert unlisted == [], (
+        "committed under merge_guard/ without an entry in release-manifest.json "
+        "(docs/pin-bump.md says how to add one): " + ", ".join(unlisted)
+    )
+
+
+def test_a_package_file_without_a_manifest_entry_is_named(tmp_path):
+    root = _package_repo(tmp_path)
+    assert _unlisted_package_files(root) == ["merge_guard/extra.py"]
+    nested = root / "merge_guard" / "adapters"
+    nested.mkdir()
+    (nested / "port.py").write_text("print('nested')\n", encoding="utf-8")
+    (root / "merge_guard" / "rules.toml").write_text("a = 1\n", encoding="utf-8")
+    _commit(root)
+    assert _unlisted_package_files(root) == [
+        "merge_guard/adapters/port.py",
+        "merge_guard/extra.py",
+        "merge_guard/rules.toml",
+    ]
+
+
+def test_listing_a_package_file_clears_the_finding(tmp_path):
+    root = _package_repo(tmp_path)
+    extra = root / "merge_guard" / "extra.py"
+    digest, size = release_manifest.digest(extra)
+    manifest = _manifest(root)
+    manifest["files"]["merge_guard/extra.py"] = {"sha256": digest, "bytes": size}
+    _rewrite(root, manifest)
+    assert _unlisted_package_files(root) == []
+    assert release_manifest.check(root) == []
+
+
+def test_only_committed_package_files_are_counted(tmp_path):
+    root = _package_repo(tmp_path)
+    cache = root / "merge_guard" / "__pycache__"
+    cache.mkdir()
+    (cache / "extra.cpython-312.pyc").write_bytes(b"\0")
+    (root / "merge_guard" / "untracked.py").write_text("print('x')\n", encoding="utf-8")
+    # A file outside the package may stay out of the closure: the rule is the package's.
+    (root / "scripts" / "tool.py").write_text("print('tool')\n", encoding="utf-8")
+    _commit(root, "scripts/tool.py")
+    assert "scripts/tool.py" not in _manifest(root)["files"]
+    assert _unlisted_package_files(root) == ["merge_guard/extra.py"]
 
 
 def test_a_mutated_file_is_named_with_its_digest(tmp_path):

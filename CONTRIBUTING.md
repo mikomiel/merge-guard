@@ -76,7 +76,9 @@ workflow calls the release workflow itself when its own run landed a pull
 request.
 
 The release pull request always changes a path outside the ordinary allowlist, so
-the gate never merges it: a maintainer merges it. The release notes do not state
+the gate never merges it: a maintainer merges it. It bumps `merge_guard/__init__.py`,
+which is in the closure, so the maintainer regenerates `release-manifest.json` on
+the release branch first (`docs/pin-bump.md`). The release notes do not state
 the closure; `release-manifest.json` owns it (`docs/pin-bump.md`). A tag or a
 release is not a deployment.
 

@@ -64,11 +64,15 @@ python -m pytest -q
 - `release-manifest.json` owns the release closure: the files a consumer copies,
   their SHA-256 and their size, taken from the checked-out commit's blobs.
   `checks` fails when a declared file differs from it, or is not a regular blob
-  in that commit. Extending the closure is a release decision, so the file stays
-  outside the ordinary allowlist.
+  in that commit. The closure is the classifier plus the `merge_guard/` package:
+  a test fails, naming the file, when a committed file under `merge_guard/` has
+  no entry. Extending the closure further is a release decision, so the file
+  stays outside the ordinary allowlist.
 - Release Please owns the version, the changelog and the tag. One release pull
   request bumps `pyproject.toml` and `merge_guard/__init__.py` together; a
-  person merges it. Do not tag by hand and never move a published tag.
+  person merges it, after regenerating `release-manifest.json` on that branch
+  because `merge_guard/__init__.py` is in the closure (`docs/pin-bump.md`). Do
+  not tag by hand and never move a published tag.
 - A source change does not authorize a tag or a release.
 
 ## Content boundary

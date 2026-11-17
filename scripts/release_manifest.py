@@ -8,14 +8,16 @@ different file sets. A release note is also uncorrectable once the tag exists,
 because this repository does not move a tag.
 
 ``release-manifest.json`` at the repository root is therefore the closure's only
-owner: the product, the entrypoints a consumer imports, and for every closure
-file its SHA-256 and size. Every digest is taken from the blob in the
+owner: the product, the entrypoints a consumer runs or imports, and for every
+closure file its SHA-256 and size. Every digest is taken from the blob in the
 checked-out commit, never from the working tree: a checkout can rewrite line
 endings, and a consumer reproduces bytes from the tag. It deliberately does not name a version -- the tag
 names the commit, and the manifest at that commit is that tag's closure. Keeping
-the version out is what lets a release pull request that only bumps the version
-leave this file untouched, and it removes the circularity of a file that would
-otherwise have to record the digest of the commit containing it.
+the version out removes the circularity of a file that would otherwise have to
+record the digest of the commit containing it. It does not keep a release pull
+request clear of this file: ``merge_guard/__init__.py`` carries ``__version__``
+and is in the closure, so the pull request that bumps the version also changes
+that file's digest, and the manifest is regenerated on the release branch.
 
 ``check`` is what CI runs on every pull request, so the manifest is true at every
 commit a tag can point at. ``write`` regenerates the digests from the same

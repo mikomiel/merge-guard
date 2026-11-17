@@ -2,12 +2,46 @@
   "schema": "release-manifest.v1",
   "product": "mikomiel/merge-guard",
   "entrypoints": [
-    "scripts/assurance.py"
+    "scripts/assurance.py",
+    "scripts/merge_guard.py",
+    "merge_guard/cli.py"
   ],
   "files": {
+    "merge_guard/__init__.py": {
+      "sha256": "b0c12f9c080950b0dd33efc1fc044e6c98ea9cfdcc118980e2546ecfe7338923",
+      "bytes": 572
+    },
+    "merge_guard/cli.py": {
+      "sha256": "9ad1fae77bea89d26169f4f6f6a4f7b5a902a7119008fe5d337650bb2d4ba291",
+      "bytes": 4164
+    },
+    "merge_guard/engine.py": {
+      "sha256": "e210b770f207124e619e1a24d3b0dba369c73fe5335bb20c0d344fd502d897ae",
+      "bytes": 15560
+    },
+    "merge_guard/forge.py": {
+      "sha256": "c928cba3859497b131c5ff829520eb71852a9b648959ffc6d24c676e21dce8b3",
+      "bytes": 5392
+    },
+    "merge_guard/forgejo.py": {
+      "sha256": "8a6b56426879a77813d7e0f5b1876e33f8ba9aafaa73c208424eb04f9a3a4d38",
+      "bytes": 30907
+    },
+    "merge_guard/github.py": {
+      "sha256": "93cd36d84447d33a4d3f2d230cf45f8fac8492b5d25d797097eb723526c67483",
+      "bytes": 13520
+    },
+    "merge_guard/policy.py": {
+      "sha256": "c14c428c4fda3d1ce74455911d31e89a64e3cd909e9b1d06d33edf8d314bd9ee",
+      "bytes": 25025
+    },
     "scripts/assurance.py": {
       "sha256": "242f1698539750c951ae8450f2f2fb864021ad226d34c09db64e554ac9ed7f51",
       "bytes": 30509
+    },
+    "scripts/merge_guard.py": {
+      "sha256": "5e5369409b73c6f0a1fb55e5d3f29d92d3d11aa370bc16c32285edd102cc054a",
+      "bytes": 581
     },
     "scripts/reference-rules.toml": {
       "sha256": "368adf9b12881f0278cbb70cf0341854757db7521389878978c6f2db29d54866",
