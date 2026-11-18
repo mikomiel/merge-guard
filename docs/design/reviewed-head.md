@@ -7,8 +7,8 @@
 
 This note records how an approval can prove which head the reviewer read.
 [trusted-relay.md](../trusted-relay.md) states what the gate proves, and
-[cli.md](../cli.md) owns the contract that this changes. Rollout steps 1 to 3
-are done, and step 5 turns the switch on here: see [Rollout](#rollout).
+[cli.md](../cli.md) owns the contract that this changes. Rollout steps 1 to 5
+are done: the switch is on in this repository's policy. See [Rollout](#rollout).
 
 ## The threat
 
