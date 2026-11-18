@@ -20,20 +20,17 @@
 
 Use Gitleaks 8.30.1. Verify the archive checksum pinned in
 [checks.yml](.github/workflows/checks.yml). Run these commands from a clean,
-committed task branch. The scans cover the tree, the history reachable from
-the branch, and the commit messages. Review the outgoing diff and messages
+committed task branch in a full clone. The scans cover every Git blob reachable
+from `HEAD` and the commit messages. Review the outgoing diff and messages
 for project-specific identifiers before pushing.
 
 ```bash
 set -euo pipefail
-gitleaks git --redact --no-banner --log-opts=HEAD .
-git ls-tree --name-only -r -z HEAD | while IFS= read -r -d '' path; do
-  git show "HEAD:$path"
-  printf '\n'
-done | gitleaks stdin --redact --no-banner
+gitleaks git --redact --no-banner --log-opts='--diff-merges=first-parent HEAD' .
+bash scripts/git_history_blobs.sh | gitleaks stdin --redact --no-banner
 git log HEAD --format=%B | gitleaks stdin --redact --no-banner
 python3 scripts/check_estate_identifiers.py
-git log HEAD --format= --patch | python3 scripts/check_estate_identifiers.py --stdin
+bash scripts/git_history_blobs.sh | python3 scripts/check_estate_identifiers.py --stdin
 git log HEAD --format=%B | python3 scripts/check_estate_identifiers.py --stdin
 ```
 

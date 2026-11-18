@@ -46,18 +46,15 @@ jobs:
             "$tools/gitleaks.tar.gz" | sha256sum --check -
           tar --extract --gzip --file "$tools/gitleaks.tar.gz" \
             --directory "$tools" gitleaks
-          "$tools/gitleaks" git --redact --no-banner --log-opts=HEAD .
-          git ls-tree --name-only -r -z HEAD | while IFS= read -r -d '' path; do
-            git show "HEAD:$path"
-            printf '\n'
-          done | "$tools/gitleaks" stdin --redact --no-banner
+          "$tools/gitleaks" git --redact --no-banner --log-opts='--diff-merges=first-parent HEAD' .
+          bash scripts/git_history_blobs.sh | "$tools/gitleaks" stdin --redact --no-banner
           git log HEAD --format=%B | "$tools/gitleaks" stdin --redact --no-banner
       - name: Scan tree, history and messages for private identifiers
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/check_estate_identifiers.py
-          git log HEAD --format= --patch | python3 scripts/check_estate_identifiers.py --stdin
+          bash scripts/git_history_blobs.sh | python3 scripts/check_estate_identifiers.py --stdin
           git log HEAD --format=%B | python3 scripts/check_estate_identifiers.py --stdin
       - name: Release manifest matches the tree
         run: python3 scripts/release_manifest.py check

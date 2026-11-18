@@ -118,7 +118,11 @@ def main() -> int:
         print("usage: check_estate_identifiers.py [--stdin]", file=sys.stderr)
         return 2
     rules = RULES + extra_rules()
-    findings = scan_lines(sys.stdin, "stdin", rules) if args else scan_tracked_files(rules)
+    if args:
+        lines = (line.decode("utf-8", errors="replace") for line in sys.stdin.buffer)
+        findings = scan_lines(lines, "stdin", rules)
+    else:
+        findings = scan_tracked_files(rules)
     if findings:
         print(f"{findings} finding(s); this content must not be public", file=sys.stderr)
         return 1
