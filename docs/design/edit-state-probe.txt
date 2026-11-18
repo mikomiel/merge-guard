@@ -1,0 +1,2 @@
+Edit-state probe for docs/design/reviewed-head.md rollout step 1.
+This file never merges.
