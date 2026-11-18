@@ -17,6 +17,7 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -26,11 +27,38 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The release-pin test resolves a tag, so the tags must be present.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.12"
-      - name: Public-content scan
-        run: python3 scripts/check_estate_identifiers.py
+      - name: Verify pinned Gitleaks and scan history, blobs and messages
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/merge-guard-tools"
+          mkdir -p "$tools"
+          curl --fail --location --silent --show-error --max-time 60 \
+            --max-filesize 33554432 \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$tools/gitleaks.tar.gz"
+          printf '%s  %s\n' \
+            '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
+            "$tools/gitleaks.tar.gz" | sha256sum --check -
+          tar --extract --gzip --file "$tools/gitleaks.tar.gz" \
+            --directory "$tools" gitleaks
+          "$tools/gitleaks" git --redact --no-banner --log-opts=HEAD .
+          git ls-tree --name-only -r -z HEAD | while IFS= read -r -d '' path; do
+            git show "HEAD:$path"
+            printf '\n'
+          done | "$tools/gitleaks" stdin --redact --no-banner
+          git log HEAD --format=%B | "$tools/gitleaks" stdin --redact --no-banner
+      - name: Scan tree, history and messages for private identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_estate_identifiers.py
+          git log HEAD --format= --patch | python3 scripts/check_estate_identifiers.py --stdin
+          git log HEAD --format=%B | python3 scripts/check_estate_identifiers.py --stdin
       - name: Release manifest matches the tree
         run: python3 scripts/release_manifest.py check
       - name: Lint and test

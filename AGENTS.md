@@ -24,10 +24,9 @@ python -m pytest -q
 - A change is ready for a pull request when every command passes.
   `CONTRIBUTING.md` "Required checks" owns the contexts that `main` requires
   on the exact head.
-- `scripts/check_estate_identifiers.py` runs in CI. It matches selected
-  credential and private-identifier patterns in tracked files. It is not a
-  complete secret scanner and it does not read commit messages. Before a
-  push, inspect the complete diff and the commit messages for credentials.
+- Before a push, run the Gitleaks and identifier checks in `CONTRIBUTING.md`.
+  Inspect the outgoing diff and commit messages for project-specific
+  identifiers. A scan after the push cannot prevent disclosure.
 
 ## Project shape
 

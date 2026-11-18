@@ -16,6 +16,27 @@
 
 4. Open one pull request. Keep it to one change, and say what evidence it adds.
 
+## Public-content checks before pushing
+
+Use Gitleaks 8.30.1. Verify the archive checksum pinned in
+[checks.yml](.github/workflows/checks.yml). Run these commands from a clean,
+committed task branch. The scans cover the tree, the history reachable from
+the branch, and the commit messages. Review the outgoing diff and messages
+for project-specific identifiers before pushing.
+
+```bash
+set -euo pipefail
+gitleaks git --redact --no-banner --log-opts=HEAD .
+git ls-tree --name-only -r -z HEAD | while IFS= read -r -d '' path; do
+  git show "HEAD:$path"
+  printf '\n'
+done | gitleaks stdin --redact --no-banner
+git log HEAD --format=%B | gitleaks stdin --redact --no-banner
+python3 scripts/check_estate_identifiers.py
+git log HEAD --format= --patch | python3 scripts/check_estate_identifiers.py --stdin
+git log HEAD --format=%B | python3 scripts/check_estate_identifiers.py --stdin
+```
+
 ## Required checks
 
 `main` requires these contexts on the pull request's exact head, all strict:
