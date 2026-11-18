@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/mikomiel/merge-guard/compare/v0.3.0...v0.4.0) (2026-11-18)
+
+
+### Features
+
+* **review:** require an unedited Reviewed-Head line on approvals ([#70](https://github.com/mikomiel/merge-guard/issues/70)) ([eb923c9](https://github.com/mikomiel/merge-guard/commit/eb923c9caaeae404c3449eae7ddbe929222bec24))
+
 ## [0.3.0](https://github.com/mikomiel/merge-guard/compare/v0.2.1...v0.3.0) (2026-11-17)
 
 
