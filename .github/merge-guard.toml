@@ -21,6 +21,10 @@ merge_workflow = "merge-guard-merge.yml"
 # new head inherits nothing, so a force-push-free base update still needs a
 # fresh approval here.
 carry_unchanged_diff = false
+# An approval counts only when its unedited body ends with
+# `Reviewed-Head: <head>` for the head it approves. See
+# docs/design/reviewed-head.md. To roll back, a person merges `false`.
+require_reviewed_head = true
 
 [paths]
 # An allowlist. Anything not matched is human-only: `scripts/`, `tests/`,

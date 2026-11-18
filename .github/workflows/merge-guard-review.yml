@@ -36,7 +36,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: mikomiel/merge-guard@65c985a7de7a7f699c5407eb4da30b7f8a198b3b  # v0.0.2: the temporal approval check
+      - uses: mikomiel/merge-guard@647f49640a6d444b0b7481799df89ae376371f37  # v0.4.0: the reviewed-head rule
         with:
           mode: review
           token: ${{ github.token }}

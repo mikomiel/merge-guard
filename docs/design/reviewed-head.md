@@ -7,8 +7,8 @@
 
 This note records how an approval can prove which head the reviewer read.
 [trusted-relay.md](../trusted-relay.md) states what the gate proves, and
-[cli.md](../cli.md) owns the contract that this changes. Rollout step 1 is done
-and step 2 is the release of the code: see [Rollout](#rollout).
+[cli.md](../cli.md) owns the contract that this changes. Rollout steps 1 to 3
+are done, and step 5 turns the switch on here: see [Rollout](#rollout).
 
 ## The threat
 
@@ -219,13 +219,20 @@ default. When it is off, the engine does not read the line.
    maintainer's decision.
 2. **Release** the field, the [codes](#refusal-codes) and the edit-state read,
    with `cli.md`, `examples/merge-guard.toml` and `troubleshooting.md`.
-   `cli.md` freezes the schema, so this is a release, not a patch.
+   `cli.md` freezes the schema, so this is a release, not a patch. *Done, in
+   v0.4.0.*
 3. **The reviewer service emits the line** here, with the switch still off,
    and acts on the `reviewed_head_*` codes as it acts on a stale approval.
+   *Done.* Every body the service posts ends with the line. A line of model
+   output that starts the same way gets a prefix, so the body has one
+   candidate. It decides that it already reviewed a head from the marker that
+   opens its body or from the line, never from `commit_id`.
 4. **Dry run.** Run `status` with a policy copy that turns the switch on.
    Every head that is approved now must still read `approved_at_head`.
-5. **Turn it on here first**, in one change that a person merges: move both
-   workflow pins to the release and set `require_reviewed_head = true`. The
+5. **Turn it on here first**, in one change that a person merges: move the
+   review workflow's pin to the release and set `require_reviewed_head = true`.
+   The merge workflow runs the default branch's own tree (`uses: ./`), so it
+   has no pin to move. The
    pinned engine (`65c985a`, v0.0.2) ignores an unknown key, so the key alone
    would claim a protection that does not run. Engines from #30 on refuse it.
 6. **Canary.** On one pull request, an approval with the line reads
