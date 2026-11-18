@@ -7,8 +7,8 @@
 
 This note records how an approval can prove which head the reviewer read.
 [trusted-relay.md](../trusted-relay.md) states what the gate proves, and
-[cli.md](../cli.md) owns the contract that this changes. Rollout steps 1 to 3
-are done, and step 5 turns the switch on here: see [Rollout](#rollout).
+[cli.md](../cli.md) owns the contract that this changes. Rollout steps 1 to 5
+are done: the switch is on in this repository's policy. See [Rollout](#rollout).
 
 ## The threat
 
@@ -229,12 +229,15 @@ default. When it is off, the engine does not read the line.
    opens its body or from the line, never from `commit_id`.
 4. **Dry run.** Run `status` with a policy copy that turns the switch on.
    Every head that is approved now must still read `approved_at_head`.
+   *Done, on #74.* The approval of its head ended with the line, and
+   `status` with the v0.4.0 engine read `approved_at_head` with the switch
+   on and off. It was the only open pull request.
 5. **Turn it on here first**, in one change that a person merges: move the
    review workflow's pin to the release and set `require_reviewed_head = true`.
    The merge workflow runs the default branch's own tree (`uses: ./`), so it
-   has no pin to move. The
-   pinned engine (`65c985a`, v0.0.2) ignores an unknown key, so the key alone
-   would claim a protection that does not run. Engines from #30 on refuse it.
+   has no pin to move. The previously pinned engine (`65c985a`, v0.0.2)
+   ignores an unknown key, so the key alone would claim a protection that
+   does not run. Engines from #30 on refuse it. *Done, in #74.*
 6. **Canary.** On one pull request, an approval with the line reads
    `approved_at_head`, a new commit reads `current_head_approval_required`
    unless the forge moved the review to it (then `reviewed_head_mismatch`), and
