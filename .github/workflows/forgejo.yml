@@ -6,13 +6,24 @@ name: forgejo
 # outside the job: the instance is an ephemeral service container, and the job
 # creates its accounts and data with a password made at run time.
 #
-# It is not a required context. tests/test_forgejo_workflow.py pins the image
-# and the action references.
+# It is not a required context. tests/test_forgejo_workflow.py pins the image,
+# the action references and the path filter.
+#
+# Every run pulls the image: a hosted runner keeps no image cache between jobs.
+# A pull request runs the job only when it changes what the live module
+# exercises (the package, the live module, the test tools or this workflow), so
+# an unrelated pull request does not depend on the image registry. Every push
+# to main still runs it.
 
 on:
   push:
     branches: [main]
   pull_request:
+    paths:
+      - "merge_guard/**"
+      - "tests/test_forgejo_live.py"
+      - "requirements-dev.txt"
+      - ".github/workflows/forgejo.yml"
   workflow_dispatch:
 
 permissions:

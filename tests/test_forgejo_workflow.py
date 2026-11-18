@@ -24,11 +24,32 @@ ACTION = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}")
 IMAGE = re.compile(r"[a-z0-9.-]+(/[a-z0-9._-]+)+:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")
 
 
-def _job() -> dict:
+def _document() -> dict:
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     assert document["permissions"] == {"contents": "read"}
-    [job] = document["jobs"].values()
+    return document
+
+
+def _job() -> dict:
+    [job] = _document()["jobs"].values()
     return job
+
+
+def test_a_pull_request_runs_the_job_when_it_changes_what_the_job_exercises():
+    # PyYAML reads the bare key `on` as True.
+    triggers = _document()[True]
+    assert triggers["push"] == {"branches": ["main"]}
+    assert "workflow_dispatch" in triggers
+    paths = triggers["pull_request"]["paths"]
+    assert set(paths) == {"merge_guard/**", "tests/test_forgejo_live.py",
+                          "requirements-dev.txt", ".github/workflows/forgejo.yml"}
+    # The live module imports the package only; a new local import elsewhere
+    # needs its path added to the filter.
+    source = (ROOT / "tests" / "test_forgejo_live.py").read_text(encoding="utf-8")
+    local = {name for name in re.findall(r"^(?:from|import) ([A-Za-z_][\w]*)", source, re.MULTILINE)
+             if (ROOT / name).is_dir() or (ROOT / f"{name}.py").exists()
+             or (ROOT / "tests" / f"{name}.py").exists()}
+    assert local == {"merge_guard"}, local
 
 
 def test_every_action_is_pinned_by_full_commit():
