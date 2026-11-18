@@ -41,11 +41,17 @@ def test_a_pull_request_runs_the_job_when_it_changes_what_the_job_exercises():
     assert triggers["push"] == {"branches": ["main"]}
     assert "workflow_dispatch" in triggers
     paths = triggers["pull_request"]["paths"]
-    assert set(paths) == {"merge_guard/**", "tests/test_forgejo_live.py",
+    assert set(paths) == {"merge_guard/**", "scripts/merge_guard.py", "tests/test_forgejo_live.py",
                           "requirements-dev.txt", ".github/workflows/forgejo.yml"}
+    source = (ROOT / "tests" / "test_forgejo_live.py").read_text(encoding="utf-8")
+    # The live module also runs scripts as subprocesses; each one it names
+    # must be in the filter.
+    launched = {f"scripts/{name}" for name in re.findall(
+        r"""ROOT\s*/\s*["']scripts["']\s*/\s*["']([^"']+)["']""", source)}
+    assert launched, "the pattern no longer finds the launched scripts"
+    assert launched <= set(paths), launched - set(paths)
     # The live module imports the package only; a new local import elsewhere
     # needs its path added to the filter.
-    source = (ROOT / "tests" / "test_forgejo_live.py").read_text(encoding="utf-8")
     local = {name for name in re.findall(r"^(?:from|import) ([A-Za-z_][\w]*)", source, re.MULTILINE)
              if (ROOT / name).is_dir() or (ROOT / f"{name}.py").exists()
              or (ROOT / "tests" / f"{name}.py").exists()}

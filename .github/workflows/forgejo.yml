@@ -11,7 +11,8 @@ name: forgejo
 #
 # Every run pulls the image: a hosted runner keeps no image cache between jobs.
 # A pull request runs the job only when it changes what the live module
-# exercises (the package, the live module, the test tools or this workflow), so
+# exercises (the package, the launcher, the live module, the test tools or this
+# workflow), so
 # an unrelated pull request does not depend on the image registry. Every push
 # to main still runs it.
 
@@ -21,6 +22,7 @@ on:
   pull_request:
     paths:
       - "merge_guard/**"
+      - "scripts/merge_guard.py"
       - "tests/test_forgejo_live.py"
       - "requirements-dev.txt"
       - ".github/workflows/forgejo.yml"
