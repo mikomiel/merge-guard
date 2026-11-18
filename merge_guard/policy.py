@@ -88,6 +88,10 @@ class Policy:
     # written before the key existed still loads; whatever opens the forge then
     # has to name it (require_forge), because there is no default forge.
     forge: str | None = None
+    # Off by default, so a policy built directly keeps the rule it had. On, an
+    # approval counts only when its unedited body ends with a line that names
+    # the head (docs/design/reviewed-head.md). It never carries.
+    require_reviewed_head: bool = False
 
 
 #: Every field the schema accepts. An unknown field is a refusal, not a warning:
@@ -98,6 +102,7 @@ KNOWN_FIELDS: dict[str, frozenset[str]] = {
     "review": frozenset({
         "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
         "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",
+        "require_reviewed_head",
     }),
     "paths": frozenset({"ordinary", "dependency_update_exemption"}),
 }
@@ -126,6 +131,7 @@ def load_policy(data: Any) -> Policy:
         review_workflow = review.get("review_workflow", "merge-guard-review.yml")
         merge_workflow = review.get("merge_workflow", "merge-guard-merge.yml")
         carry = review.get("carry_unchanged_diff", True)
+        reviewed_head = review.get("require_reviewed_head", False)
     except (KeyError, TypeError, AttributeError) as exc:
         raise Unusable(f"policy_missing_field: {exc}") from exc
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
@@ -145,11 +151,18 @@ def load_policy(data: Any) -> Policy:
         raise Unusable("policy_dependency_exemption_invalid")
     if type(carry) is not bool:
         raise Unusable("policy_carry_unchanged_diff_invalid")
+    if type(reviewed_head) is not bool:
+        raise Unusable("policy_require_reviewed_head_invalid")
+    if reviewed_head and carry:
+        # The carry finds the older head through `commit_id`, the field that the
+        # switch stops trusting, and the key is true when absent. Retired with
+        # the key (docs/design/reviewed-head.md, "Carry and refresh").
+        raise Unusable("policy_reviewed_head_requires_carry_off")
     if forge is not None and forge not in FORGES:
         raise Unusable("policy_forge_invalid")
     return Policy(repository, base_branch, reviewer_id, reviewer_login, reviewer_type,
                   tuple(checks), gate, tuple(ordinary), exemption,
-                  review_workflow, merge_workflow, carry, forge)
+                  review_workflow, merge_workflow, carry, forge, reviewed_head)
 
 
 def require_forge(policy: Policy, named: str | None = None) -> Policy:
@@ -158,6 +171,10 @@ def require_forge(policy: Policy, named: str | None = None) -> Policy:
     ``named`` is a forge named outside the file, for example by the composite
     action's run line. The two must agree when both are present, so a surface
     cannot silently retarget a policy written for the other forge.
+
+    The reviewed-head rule reads a review's edit state, which only the GitHub
+    adapter can read in this release. The forge may be unnamed when the file is
+    loaded, so the refusal belongs here, once the forge is known.
     """
     if named is not None and named not in FORGES:
         raise Unusable("policy_forge_invalid")
@@ -165,7 +182,10 @@ def require_forge(policy: Policy, named: str | None = None) -> Policy:
         raise Unusable("policy_forge_missing")
     if policy.forge is not None and named is not None and named != policy.forge:
         raise Unusable("policy_forge_conflict")
-    return replace(policy, forge=policy.forge or named)
+    forge = policy.forge or named
+    if policy.require_reviewed_head and forge == "forgejo":
+        raise Unusable("policy_reviewed_head_forge_unsupported")
+    return replace(policy, forge=forge)
 
 
 def valid_sha(value: Any) -> bool:
@@ -194,32 +214,80 @@ def _timestamp(value: Any, unusable: str) -> datetime:
     return stamp
 
 
-def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, policy: Policy,
-                   head_committed_at: str, carried: Any = frozenset()) -> tuple[str, str]:
-    """Latest decisive state per verified identity; any change request blocks.
+#: A line of an approval's body is a candidate for the reviewed-head line when,
+#: without its leading spaces and tabs, it starts with this key in any case.
+#: ``docs/design/reviewed-head.md`` ("The line") owns the grammar.
+_REVIEWED_HEAD_KEY = "reviewed-head"
+#: The only line that attests: this exact case, one space, 40 lowercase hex.
+_REVIEWED_HEAD_LINE = re.compile(r"Reviewed-Head: ([0-9a-f]{40})")
 
-    ``maintainers`` holds numeric user ids the API verified as write/maintain/
-    admin (or owner, on Forgejo). Association labels alone never grant that
-    authority, and a review by the pull request author never counts.
 
-    An approval of ``head`` counts only when the review could have seen it. The
-    forge may reassign a review's ``commit_id`` to a commit that did not exist
-    at submission time, and ``original_commit_id`` is null in observed data, so
-    ``head_committed_at`` is required rather than optional: a caller that cannot
-    supply it cannot get ``approved_at_head``.
+def reviewed_head_code(body: str, head: str) -> str | None:
+    """Why an approval body does not attest ``head``, or None when its line does.
+
+    The code is ``reviewed_head_missing``, ``reviewed_head_malformed`` or
+    ``reviewed_head_mismatch``. The body is split at LF only: ``splitlines``
+    would also split at CR and at the Unicode line separators. Each line loses
+    one trailing CR, then its trailing spaces and tabs, and the empty lines at
+    the end are ignored. Exactly one line may be a candidate, it must be the
+    last line, and that line must match the pattern from its first character:
+    a leading space, a short or upper-case value, or text after it never counts.
     """
-    if not valid_sha(head) or not isinstance(reviews, list) or not author:
-        raise Unusable("invalid_review_snapshot")
-    if not isinstance(maintainers, (set, frozenset)):
-        raise Unusable("invalid_maintainer_set")
-    if not isinstance(carried, (set, frozenset)):
-        raise Unusable("invalid_carried_set")
-    head_committed = _timestamp(head_committed_at, "invalid_head_commit_time")
-    if not policy.carry_unchanged_diff:
-        # The runner never supplies carry evidence under this policy. Zeroing it
-        # here as well means a direct caller of this function cannot reintroduce
-        # it, so the guarantee does not depend on one call site remembering.
-        carried = frozenset()
+    lines = []
+    for raw in body.split("\n"):
+        line = raw.removesuffix("\r")
+        lines.append(line.rstrip(" \t"))
+    while lines and not lines[-1]:
+        lines.pop()
+    candidates = [index for index, line in enumerate(lines)
+                  if line.lstrip(" \t")[:len(_REVIEWED_HEAD_KEY)].lower() == _REVIEWED_HEAD_KEY]
+    if not candidates:
+        return "reviewed_head_missing"
+    # One candidate, and it is the last line: a second one or a later line breaks it.
+    match = _REVIEWED_HEAD_LINE.fullmatch(lines[-1])
+    if candidates != [len(lines) - 1] or match is None:
+        return "reviewed_head_malformed"
+    if match.group(1) != head:
+        return "reviewed_head_mismatch"
+    return None
+
+
+def edit_state_usable(state: Any) -> bool:
+    """Whether ``state`` is a record of ``Forge.review_edit_state``.
+
+    It holds the raw Markdown ``body`` and ``last_edited_at``, which is None only
+    for a review that was never edited. Any other value of the key, an absent key
+    included, is not a usable record: it is never read as "unedited".
+    """
+    return (isinstance(state, dict) and isinstance(state.get("body"), str)
+            and "last_edited_at" in state
+            and (state["last_edited_at"] is None or isinstance(state["last_edited_at"], str)))
+
+
+def _review_reviewed_head_code(item: dict[str, Any], head: str) -> str | None:
+    """The ``reviewed_head_*`` code for one approval of ``head``, or None when it attests.
+
+    The engine attaches ``edit_state`` from one response of the forge. REST has
+    no edit time, so a review without a usable attachment is refused here, and
+    the engine refuses it first. Any edit refuses, the reviewer's own included,
+    and an edited body is not parsed.
+    """
+    state = item.get("edit_state")
+    if not edit_state_usable(state):
+        raise Unusable("review_edit_state_unusable")
+    if state["last_edited_at"] is not None:
+        return "reviewed_head_edited"
+    return reviewed_head_code(state["body"], head)
+
+
+def _latest_decisive(reviews: list[Any], author: str, maintainers: Any,
+                     policy: Policy) -> dict[int, dict[str, Any]]:
+    """The latest decisive review of each trusted identity, by user id.
+
+    Trusted is the configured reviewer, or a user whose id is in ``maintainers``.
+    The pull request author never counts. Every review is validated, counted or
+    not, so a malformed one is refused whoever wrote it.
+    """
     latest: dict[int, dict[str, Any]] = {}
     for item in reviews:
         if not isinstance(item, dict):
@@ -241,8 +309,68 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
         previous = latest.get(user["id"])
         if previous is None or item["id"] > previous["id"]:
             latest[user["id"]] = item
+    return latest
+
+
+def approvals_at_head(reviews: Any, head: str, author: str, maintainers: Any,
+                      policy: Policy) -> list[dict[str, Any]]:
+    """The approvals of ``head`` that :func:`review_verdict` weighs.
+
+    These are the latest decisive reviews of the trusted identities that are
+    ``APPROVED`` with ``commit_id`` equal to ``head``, before the timestamp
+    check and the line. The engine reads the edit state of exactly these, so
+    the definition of a counted approval has one owner.
+    """
+    if not valid_sha(head) or not isinstance(reviews, list) or not author:
+        raise Unusable("invalid_review_snapshot")
+    if not isinstance(maintainers, (set, frozenset)):
+        raise Unusable("invalid_maintainer_set")
+    return [item for item in _latest_decisive(reviews, author, maintainers, policy).values()
+            if item["state"] == "APPROVED" and item["commit_id"] == head]
+
+
+def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, policy: Policy,
+                   head_committed_at: str, carried: Any = frozenset()) -> tuple[str, str]:
+    """Latest decisive state per verified identity; any change request blocks.
+
+    ``maintainers`` holds numeric user ids the API verified as write/maintain/
+    admin (or owner, on Forgejo). Association labels alone never grant that
+    authority, and a review by the pull request author never counts.
+
+    An approval of ``head`` counts only when the review could have seen it. The
+    forge may reassign a review's ``commit_id`` to a commit that did not exist
+    at submission time, and ``original_commit_id`` is null in observed data, so
+    ``head_committed_at`` is required rather than optional: a caller that cannot
+    supply it cannot get ``approved_at_head``.
+
+    With ``policy.require_reviewed_head`` an approval of ``head`` that passes
+    that check must also attest the head: its review carries ``edit_state``
+    (see :func:`_review_reviewed_head_code`), unedited, with a last line that
+    names ``head``. The rank is a change request, then an approval that attests,
+    then the ``reviewed_head_*`` code of the newest approval of ``head`` that
+    was set aside, then ``current_head_approval_required``. An approval of an
+    earlier head is never examined, so it keeps that last reason. A bad line is
+    a reason, never an :class:`Unusable`.
+    """
+    if not valid_sha(head) or not isinstance(reviews, list) or not author:
+        raise Unusable("invalid_review_snapshot")
+    if not isinstance(maintainers, (set, frozenset)):
+        raise Unusable("invalid_maintainer_set")
+    if not isinstance(carried, (set, frozenset)):
+        raise Unusable("invalid_carried_set")
+    head_committed = _timestamp(head_committed_at, "invalid_head_commit_time")
+    if not policy.carry_unchanged_diff or policy.require_reviewed_head:
+        # The runner never supplies carry evidence under this policy. Zeroing it
+        # here as well means a direct caller of this function cannot reintroduce
+        # it, so the guarantee does not depend on one call site remembering. The
+        # reviewed-head rule never carries: it needs `carry_unchanged_diff` off,
+        # and a policy built without `load_policy` is held to that here.
+        carried = frozenset()
+    latest = _latest_decisive(reviews, author, maintainers, policy)
     if any(x["state"] == "CHANGES_REQUESTED" for x in latest.values()):
         return "failure", "changes_requested"
+    attested = False
+    set_aside: list[tuple[int, str]] = []
     for item in latest.values():
         if item["state"] != "APPROVED":
             continue
@@ -253,9 +381,22 @@ def review_verdict(reviews: Any, head: str, author: str, maintainers: Any, polic
                 # the approval says nothing about it. Let the carried branch and
                 # the final refusal decide instead of inventing a success.
                 continue
-            return "success", "approved_at_head"
+            if not policy.require_reviewed_head:
+                return "success", "approved_at_head"
+            # Every approval of the head is weighed before the rank, so the
+            # answer does not depend on the order of the reviews.
+            code = _review_reviewed_head_code(item, head)
+            if code is None:
+                attested = True
+            else:
+                set_aside.append((item["id"], code))
+            continue
         if item["commit_id"] in carried:
             return "success", f"approved at {item['commit_id'][:12]} (carried, unchanged diff)"
+    if attested:
+        return "success", "approved_at_head"
+    if set_aside:
+        return "pending", max(set_aside, key=lambda entry: entry[0])[1]
     return "pending", "current_head_approval_required"
 
 

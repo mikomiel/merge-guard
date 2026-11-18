@@ -79,6 +79,40 @@ def maintainer_ids(api: Forge, reviews: Any, author: str) -> set[int]:
     return ids
 
 
+def with_edit_state(api: Forge, pr: dict[str, Any], reviews: list[Any],
+                    maintainers: set[int], policy: mg.Policy) -> list[Any]:
+    """The reviews, with ``edit_state`` on each approval that the verdict counts.
+
+    Only a policy with ``require_reviewed_head`` reads it: any other gets
+    ``reviews`` back, and the forge is not asked. The line is never read from the
+    REST body. ``edit_state`` is built here from one answer of the forge, and a
+    key of that name that a review already carried is dropped, so nothing else
+    can supply it.
+
+    The approvals are those of ``mg.approvals_at_head`` for these maintainers,
+    joined to the answer by review id. One that the answer lacks, and a record
+    that is not usable, are refused: a review is never read as unedited because
+    the forge was silent. A pull request with no such approval has nothing to
+    read, so the forge is not asked.
+    """
+    if not policy.require_reviewed_head:
+        return reviews
+    counted = {item["id"] for item in mg.approvals_at_head(
+        reviews, pr["head"]["sha"], pr["user"]["login"], maintainers, policy)}
+    states = api.review_edit_state(pr["number"]) if counted else {}
+    attached: list[Any] = []
+    for item in reviews:
+        review = {key: value for key, value in item.items() if key != "edit_state"}
+        if item["id"] in counted:
+            state = states.get(item["id"]) if isinstance(states, dict) else None
+            if not mg.edit_state_usable(state):
+                raise ApiError("review_edit_state_unusable")
+            review["edit_state"] = {"body": state["body"],
+                                    "last_edited_at": state["last_edited_at"]}
+        attached.append(review)
+    return attached
+
+
 def _carried_review(reviews: list[Any], head: str, policy: mg.Policy) -> str | None:
     """The configured reviewer's latest decisive review, when it approved an older head."""
     latest: dict[str, Any] | None = None
@@ -126,9 +160,10 @@ def carried_heads(api: Forge, pr: dict[str, Any], reviews: list[Any],
 
     A policy that turns ``carry_unchanged_diff`` off gets no carry at all: an
     unchanged patch is not an approval of the commit that carries it, and that
-    repository binds every approval to its own head.
+    repository binds every approval to its own head. So does one that requires
+    the reviewed head, whose attestation names exactly one commit.
     """
-    if not policy.carry_unchanged_diff:
+    if not policy.carry_unchanged_diff or policy.require_reviewed_head:
         return set()
     old = _carried_review(reviews, pr["head"]["sha"], policy)
     if old is None:
@@ -176,6 +211,7 @@ def collect_reviews(api: Forge, known_heads: set[str], policy: mg.Policy) -> lis
         pr["reviews"] = api.reviews(pr["number"])
         pr["head_committed_at"] = api.commit_time(pr["head"]["sha"])
         pr["maintainers"] = sorted(maintainer_ids(api, pr["reviews"], pr["user"]["login"]))
+        pr["reviews"] = with_edit_state(api, pr, pr["reviews"], set(pr["maintainers"]), policy)
         pr["carried_heads"] = sorted(carried_heads(api, pr, pr["reviews"], policy))
         snapshot.append(pr)
     return snapshot
@@ -305,6 +341,7 @@ def run_merge(api: Forge, policy: mg.Policy, apply: bool) -> list[dict[str, Any]
             continue
         reviews = api.reviews(number)
         maintainers = maintainer_ids(api, reviews, current["user"]["login"])
+        reviews = with_edit_state(api, current, reviews, maintainers, policy)
         comparison = api.compare(current["base"]["sha"], head)
         carried = carried_heads(api, current, reviews, policy)
         eligible, reason = mg.merge_decision(

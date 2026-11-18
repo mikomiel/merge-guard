@@ -24,6 +24,12 @@ merge_workflow = "merge-guard-merge.yml"
 # a new head inherits nothing. On by default, because a base advance otherwise
 # discards a review the gate already accepted.
 carry_unchanged_diff = true
+# Off by default. On, an approval counts only when its unedited body ends with
+# the line "Reviewed-Head: <the 40-character SHA of the head>", from the reviewer
+# and from every verified maintainer. It needs carry_unchanged_diff = false, a
+# GitHub policy and a release that knows the key: see "The reviewed head" in
+# docs/cli.md before you turn it on.
+require_reviewed_head = false
 
 [paths]
 # An allowlist. Anything not matched is human-only.
