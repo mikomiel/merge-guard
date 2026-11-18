@@ -339,6 +339,16 @@ def test_the_repository_policy_requires_dependency_review():
     assert policy.required_checks == ("checks", "dependency-review")
 
 
+def test_the_repository_policy_requires_the_reviewed_head():
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / ".github/merge-guard.toml").read_text())
+    policy = mg.load_policy(data)
+    assert policy.require_reviewed_head is True
+    # The review workflow must pin an engine that reads the switch: v0.4.0 or later.
+    workflow = (root / ".github/workflows/merge-guard-review.yml").read_text()
+    assert "mikomiel/merge-guard@647f49640a6d444b0b7481799df89ae376371f37" in workflow
+
+
 def test_the_example_policy_loads():
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "examples/merge-guard.toml").read_text())
