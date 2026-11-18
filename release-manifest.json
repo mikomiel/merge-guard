@@ -16,24 +16,24 @@
       "bytes": 4164
     },
     "merge_guard/engine.py": {
-      "sha256": "e210b770f207124e619e1a24d3b0dba369c73fe5335bb20c0d344fd502d897ae",
-      "bytes": 15560
+      "sha256": "bf9c43c90d95916d8461c39dfc6a25338573e6c494bf288b41b308d3617721e2",
+      "bytes": 17611
     },
     "merge_guard/forge.py": {
-      "sha256": "c928cba3859497b131c5ff829520eb71852a9b648959ffc6d24c676e21dce8b3",
-      "bytes": 5392
+      "sha256": "0648c0191c6e4f6c908a569455f4119fc85a14decb5d1a8ceb2b163403b53b4d",
+      "bytes": 6297
     },
     "merge_guard/forgejo.py": {
-      "sha256": "8a6b56426879a77813d7e0f5b1876e33f8ba9aafaa73c208424eb04f9a3a4d38",
-      "bytes": 30907
+      "sha256": "4146a97d9d875139048a5f6bb2f32b1be28e6c890cf7231a609369e25a55b9dd",
+      "bytes": 31357
     },
     "merge_guard/github.py": {
-      "sha256": "93cd36d84447d33a4d3f2d230cf45f8fac8492b5d25d797097eb723526c67483",
-      "bytes": 13520
+      "sha256": "8e20c09b681bc17d860b4216b28e61f9675da2561f91bc5fb3e5e98e90e6c684",
+      "bytes": 19877
     },
     "merge_guard/policy.py": {
-      "sha256": "c14c428c4fda3d1ce74455911d31e89a64e3cd909e9b1d06d33edf8d314bd9ee",
-      "bytes": 25025
+      "sha256": "9defa48c6ced17b4ab0fbecd63f7d971e1a4002cf7477aa87c020190717cea41",
+      "bytes": 32148
     },
     "scripts/assurance.py": {
       "sha256": "242f1698539750c951ae8450f2f2fb864021ad226d34c09db64e554ac9ed7f51",
