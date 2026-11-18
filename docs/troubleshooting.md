@@ -57,9 +57,68 @@ Request a fresh review of the current head, from a qualifying reviewer, rather
 than re-running the review workflow: re-reading the old approval cannot change
 either fact.
 
+With `require_reviewed_head` on, an approval at this head can also be set aside
+for its body. The description then names a `reviewed_head_*` reason: see the
+next section.
+
 The description `required_check_missing: <name>` is not a review verdict at all:
 the approval is at this head, but a required check has no run for it. Use the
 recovery in the section above.
+
+## The gate says `pending` with a `reviewed_head_*` reason
+
+These reasons exist only when `[review] require_reviewed_head` is `true`. The
+approval is at this head, but the gate does not count it. Each reason names one
+approval, the newest that was set aside. A different approval of the same head
+that attests it still turns the gate green. An approval of an earlier head never
+gets one of these reasons: it keeps `current_head_approval_required`.
+
+| Reason | Meaning | What to do |
+| --- | --- | --- |
+| `reviewed_head_missing` | No line of the approval's body starts with `Reviewed-Head` (in any case, after leading spaces and tabs) | Submit a new approval whose body ends with `Reviewed-Head: <the 40-character head SHA>` |
+| `reviewed_head_malformed` | The body has such a line, but it breaks the grammar: it is not the last line, there is more than one, or it is not `Reviewed-Head: ` and then 40 lowercase hexadecimal characters, with no text before or after | Submit a new approval with one line at the end, in exactly that form. A short SHA or an upper-case one never counts |
+| `reviewed_head_mismatch` | The line is valid and names another commit than the head | Review the head, then submit a new approval that names it. If the head moved while you reviewed, the new commit needs its own review |
+| `reviewed_head_edited` | The review was edited after it was submitted, by anyone, the reviewer included. The gate does not read the body of an edited review | Do not repair the old review. Submit a new approval of the head with the line |
+
+A new approval replaces the old one: only the latest decisive review of a person
+counts. Do not try to repair a submitted review. In the forge test that this rule
+rests on, the edit time stayed set after the old text was restored and after a
+revision was deleted.
+
+A verified maintainer's approval needs the line too. `merge` also needs the
+configured reviewer's own approval with the line: when only a maintainer's
+approval attests, the gate is green and the merge run refuses with
+`configured_reviewer_required_for_automerge`.
+
+## A run fails with `review_edit_state_unusable`
+
+**Symptom.** The `review` or `merge` run exits 1 with
+`merge_guard_refused: review_edit_state_unusable`. With `--apply`, `review` also
+publishes `review_snapshot_unavailable` for the heads it knows, so no head keeps
+an old green.
+
+**Cause.** With `require_reviewed_head` on, the gate reads the body and the edit
+time of each review from GitHub's GraphQL API. The run fails when that read does
+not complete: the call failed or timed out, the response is too large or is not
+the shape that was asked for, the list of reviews is incomplete, or the response
+lacks a review that counts. The gate never reads a missing record as an unedited
+review.
+
+**Recovery.** Run the workflow again. If the failure repeats, check that the
+workflow grants `pull-requests: read`, as the example workflows do, and check
+the status of GitHub. Do not turn the switch off to get past it: that removes
+the protection for every pull request.
+
+## A run is refused at the policy
+
+These refusals exit 2 before the run reads the forge. Each names the field that
+you change:
+
+| Code | Cause | What to do |
+| --- | --- | --- |
+| `policy_require_reviewed_head_invalid` | `require_reviewed_head` is not `true` or `false` (a string such as `"true"` is not a boolean) | Write a TOML boolean |
+| `policy_reviewed_head_requires_carry_off` | The switch is on and `carry_unchanged_diff` is absent or `true` | Set `carry_unchanged_diff = false`. An approval binds to the one head that its line names, so it never carries, and every base update needs a new review |
+| `policy_reviewed_head_forge_unsupported` | The switch is on and the forge is `forgejo` | Turn the switch off for that policy. This release reads the edit state of a review on GitHub only |
 
 ## A pull request is approved, green, and still not merged
 

@@ -1,12 +1,14 @@
 # The reviewed head
 
-**Status:** Proposed - the decision is the maintainer's.
+**Status:** Accepted (2026-11-18) - the maintainer made the decisions under
+[Decisions](#decisions).
 
 **Issue:** #20, which follows #15 and #19.
 
-This note proposes how an approval can prove which head the reviewer read. It
-changes no code. [trusted-relay.md](../trusted-relay.md) states what the gate
-proves today, and [cli.md](../cli.md) owns the contract that would change.
+This note records how an approval can prove which head the reviewer read.
+[trusted-relay.md](../trusted-relay.md) states what the gate proves, and
+[cli.md](../cli.md) owns the contract that this changes. Rollout step 1 is done
+and step 2 is the release of the code: see [Rollout](#rollout).
 
 ## The threat
 
@@ -67,12 +69,13 @@ review", and nothing about what the reviewer read.
 
 ## Recommendation
 
-Adopt option 1 behind a policy switch that is off by default, if the forge
-test in rollout step 1 passes. It moves the evidence to the party that knows
-what it read and needs no state in the gate; option 2 adds state and still
-trusts the forge's association. A missing, malformed or mismatched line always
-refuses. An author with write access can also edit an approval, so for that
-author option 1 closes the #20 attack only if the forge records every edit.
+Adopt option 1 behind a policy switch that is off by default. The forge test
+in rollout step 1 passed, and the maintainer accepted it on 2026-11-18. It
+moves the evidence to the party that knows what it read and needs no state in
+the gate; option 2 adds state and still trusts the forge's association. A
+missing, malformed or mismatched line always refuses. An author with write
+access can also edit an approval, so for that author option 1 closes the #20
+attack only if the forge records every edit.
 
 ## The line
 
@@ -116,8 +119,12 @@ docs](https://docs.github.com/en/communities/moderating-comments-and-conversatio
 and the REST review object has no edit time, so a pull request author with
 write access could otherwise rewrite the line. The gate reads each body and its
 `lastEditedAt` (GraphQL `PullRequestReview`) from one response, so no edit can
-fall between two reads. Nobody has verified yet that `lastEditedAt` records
-every such edit, so rollout step 1 tests it before any release.
+fall between two reads. Rollout step 1 tested the field once: an author's REST
+edit of the reviewer's approval set `lastEditedAt`, and it stayed set after the
+content was restored and after a revision was deleted. The case of a second
+account with write access was not tested. An edit means a `lastEditedAt` that is
+not null. The gate never infers one from `userContentEdits`, which holds an
+entry for the original content once a review has been edited.
 
 ## Evaluation with the switch on
 
@@ -132,11 +139,14 @@ success into a refusal.
 - Merge mode reads the bodies and their edit state again before it merges.
 
 The rank, highest first, is `changes_requested`, `approved_at_head`, the
-`reviewed_head_*` code of the newest approval set aside for its line or its
-edit, and `current_head_approval_required`. A draft still reads
-`pull_request_is_draft`. A bad line is a per-head `pending` reason, never an
-engine refusal: that would stop the run, and the review workflow would mark
-every known head `review_snapshot_unavailable`, blocking every pull request.
+`reviewed_head_*` code of the newest approval of the head set aside for its line
+or its edit, and `current_head_approval_required`. A `reviewed_head_*` code
+applies only to an approval whose `commit_id` is the head, and only after the
+#19 timestamp check accepted it. An approval of an earlier head keeps
+`current_head_approval_required`. A draft still reads `pull_request_is_draft`. A
+bad line is a per-head `pending` reason, never an engine refusal: that would
+stop the run, and the review workflow would mark every known head
+`review_snapshot_unavailable`, blocking every pull request.
 
 ## Carry and refresh
 
@@ -188,20 +198,25 @@ reviewer. Issue #20 calls it the trusted review relay. It is not
 
    Reviewed-Head: 0123456789abcdef0123456789abcdef01234567
    ```
-3. If the head moves first, the gate reports `reviewed_head_mismatch`. Review
-   the new head and submit a new review. Do not edit the old review.
+3. If the head moves first, the gate reports `current_head_approval_required`,
+   or `reviewed_head_mismatch` when the forge moved your review to the new head.
+   Review the new head and submit a new review. Do not edit the old review.
 
 ## Rollout
 
 The switch is `[review] require_reviewed_head`, a boolean that is `false` by
 default. When it is off, the engine does not read the line.
 
-1. **Test the forge, before any release.** No engine code is needed. On a
-   test pull request whose author has write access, an account of the
-   configured reviewer type and a second account with write access each
-   approve. The author edits each body, then deletes the edit from the history
-   where the forge offers it. One GraphQL query must show `lastEditedAt` set
-   after each step, or nothing is released and the maintainer decides again.
+1. **Test the forge, before any release.** *Done, on test pull request #69.
+   The results are on #20.* No engine code was needed. The plan was an approval
+   by an account of the configured reviewer type and one by a second account
+   with write access, an edit of each body by the author, and then the deletion
+   of the edit from the history where the forge offers it. One GraphQL query had
+   to show `lastEditedAt` set after each step, or nothing would be released.
+   Result: `lastEditedAt` was set by an author's REST edit of the reviewer's
+   approval, and it stayed set after the content was restored and after a
+   revision was deleted. The case of the second account was not tested, by the
+   maintainer's decision.
 2. **Release** the field, the [codes](#refusal-codes) and the edit-state read,
    with `cli.md`, `examples/merge-guard.toml` and `troubleshooting.md`.
    `cli.md` freezes the schema, so this is a release, not a patch.
@@ -214,8 +229,9 @@ default. When it is off, the engine does not read the line.
    pinned engine (`65c985a`, v0.0.2) ignores an unknown key, so the key alone
    would claim a protection that does not run. Engines from #30 on refuse it.
 6. **Canary.** On one pull request, an approval with the line reads
-   `approved_at_head`, a new commit reads `reviewed_head_mismatch`, and an
-   approval without the line reads `reviewed_head_missing`.
+   `approved_at_head`, a new commit reads `current_head_approval_required`
+   unless the forge moved the review to it (then `reviewed_head_mismatch`), and
+   an approval without the line reads `reviewed_head_missing`.
 7. **Adopters** turn it on when their reviewers emit the line. Making it the
    default is a later, breaking decision.
 
@@ -225,9 +241,11 @@ migration, and approvals with the line keep counting.
 ## Refusal codes
 
 These codes are new, and each fits the 140-character status description. No
-published code changes its meaning, but an approval of an earlier head now
-reads a `reviewed_head_*` code instead of `current_head_approval_required`. A
-caller that acts on that code must act on the new codes too.
+published code changes its meaning. An approval of an earlier head keeps
+`current_head_approval_required`: a `reviewed_head_*` code replaces it only for
+an approval whose `commit_id` is the head. A caller that acts on
+`current_head_approval_required` by asking for a review must act on the new
+codes too, because an approval of the head that is set aside now reads one.
 
 | Code | Channel | Meaning |
 | --- | --- | --- |
@@ -238,6 +256,7 @@ caller that acts on that code must act on the new codes too.
 | `review_edit_state_unusable` | operation failure, exit 1 | The response with bodies and edit state is unreadable or lacks a counted review; in review mode the run then publishes `review_snapshot_unavailable` |
 | `policy_require_reviewed_head_invalid` | unusable input, exit 2 | The switch is not a boolean |
 | `policy_reviewed_head_requires_carry_off` | unusable input, exit 2 | The switch is on and `carry_unchanged_diff` is absent or `true`. Retired when the schema drops that key |
+| `policy_reviewed_head_forge_unsupported` | unusable input, exit 2 | The switch is on and the forge is `forgejo`. This release reads the edit state on GitHub only |
 
 ## What it does not prove
 
@@ -246,18 +265,29 @@ caller that acts on that code must act on the new codes too.
 - That the reviewer credential is safe. Its holder can attest any commit.
 - That the reviewer service took the SHA from what it read. A service that
   writes the current head instead names a head nobody read, undetected.
-- That the forge keeps recording edits. Rollout step 1 observes it once. After
-  a forge change, anyone with write access could rewrite a line unseen.
+- That the forge keeps recording edits. Rollout step 1 observed it once, for an
+  author's edit of the reviewer's approval, and not for an approval by a second
+  account with write access. After a forge change, anyone with write access
+  could rewrite a line unseen.
 - Anything stronger than SHA-1. The line names a 40-hex SHA-1 commit ID.
 - Anything while the switch is off. trusted-relay.md then states the guarantee.
 
-## Open questions for the maintainer
+## Decisions
 
-- Must verified maintainers write the line too? This note says yes, because
-  the forge can move any review.
-- Must an edit by the reviewer itself refuse? This note says yes, because it
-  does not trust the editor field.
-- Should a `reviewed_head_*` code apply only when `commit_id` equals the head?
-  A stale approval would keep today's reason, and a mismatch would flag a
-  moved association.
-- Can every forge behind the port (#34) read a body and its edit state at once?
+The maintainer decided these points on 2026-11-18. They are final, and they
+replace the open questions that this note held.
+
+1. **Verified maintainers write the line too.** Every counted approval needs it,
+   because the forge can move any review.
+2. **Every edit refuses, the reviewer's own included.** "Edited" means that the
+   GraphQL field `PullRequestReview.lastEditedAt` is not null. The gate never
+   infers an edit from `userContentEdits`, and it does not trust the editor
+   field.
+3. **A `reviewed_head_*` code applies only to an approval whose `commit_id`
+   equals the head.** An approval of an earlier head keeps
+   `current_head_approval_required`, and a mismatch flags a moved association.
+4. **GitHub only in this release.** Only the GitHub adapter reads the body and
+   the edit state of a review; the Forgejo adapter refuses. With the switch on
+   and the forge `forgejo`, `require_forge` refuses with
+   `policy_reviewed_head_forge_unsupported`, exit 2. The refusal comes when the
+   forge is known, because the policy file may leave the forge to `--forge`.

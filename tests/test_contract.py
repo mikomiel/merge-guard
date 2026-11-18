@@ -39,6 +39,7 @@ FROZEN_SCHEMA = {
     "review": {
         "reviewer_id", "reviewer_login", "reviewer_type", "required_checks",
         "gate_context", "review_workflow", "merge_workflow", "carry_unchanged_diff",
+        "require_reviewed_head",
     },
     "paths": {"ordinary", "dependency_update_exemption"},
 }
@@ -72,6 +73,43 @@ def test_the_document_covers_every_mode_and_exit_code():
         assert f"`{mode}`" in text
     for code in (cli.EXIT_OK, cli.EXIT_OPERATIONAL, cli.EXIT_UNUSABLE):
         assert f"| {code} |" in text
+
+
+#: Each code of the reviewed-head rule, and the channel that docs/cli.md and
+#: docs/design/reviewed-head.md give it.
+REVIEWED_HEAD_CODES = {
+    "reviewed_head_missing": "`pending` reason",
+    "reviewed_head_malformed": "`pending` reason",
+    "reviewed_head_mismatch": "`pending` reason",
+    "reviewed_head_edited": "`pending` reason",
+    "review_edit_state_unusable": "operation failure, exit 1",
+    "policy_require_reviewed_head_invalid": "unusable input, exit 2",
+    "policy_reviewed_head_requires_carry_off": "unusable input, exit 2",
+    "policy_reviewed_head_forge_unsupported": "unusable input, exit 2",
+}
+
+
+def test_every_reviewed_head_code_is_emitted_by_the_source():
+    """The pinned list is real: a code that no module can emit would pass vacuously below."""
+    source = "".join(path.read_text(encoding="utf-8")
+                     for path in (ROOT / "merge_guard").glob("*.py"))
+    for code in REVIEWED_HEAD_CODES:
+        assert f'"{code}"' in source, code
+
+
+def test_the_documents_cover_the_reviewed_head_field_and_each_of_its_codes():
+    cli_text = (ROOT / "docs" / "cli.md").read_text(encoding="utf-8")
+    design = (ROOT / "docs" / "design" / "reviewed-head.md").read_text(encoding="utf-8")
+    troubleshooting = (ROOT / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
+    assert "`require_reviewed_head`" in cli_text
+    for code, channel in REVIEWED_HEAD_CODES.items():
+        assert f"| `{code}` | {channel} |" in cli_text, code
+        assert f"| `{code}` | {channel} |" in design, code
+        assert f"`{code}`" in troubleshooting, code
+    exit_codes = {line.split("|")[1].strip(): line for line in cli_text.splitlines()
+                  if line.startswith(("| 1 |", "| 2 |"))}
+    assert "review_edit_state_unusable" in exit_codes["1"]
+    assert "policy_reviewed_head_forge_unsupported" in exit_codes["2"]
 
 
 def test_the_action_captures_the_envelope_and_reports_it_through_github_output():

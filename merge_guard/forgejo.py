@@ -383,6 +383,15 @@ class Forgejo:
                            "user": self._actor(item.get("user"))})
         return result
 
+    def review_edit_state(self, number: int) -> dict[int, dict[str, Any]]:
+        """Forgejo's review record offers no edit state that this release reads: refuse.
+
+        ``require_forge`` refuses the reviewed-head rule on Forgejo, so this is
+        unreachable from the command line. A caller that builds the adapter
+        itself still gets a refusal, never an unedited review.
+        """
+        raise ApiError("review_edit_state_unusable")
+
     def request(self, path: str) -> Any:
         """A repository-relative read; the engine reads collaborator permission."""
         return self._get(path)

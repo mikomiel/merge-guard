@@ -19,7 +19,10 @@ Records:
 - review: ``id`` (ordered by time), ``user.id``, ``user.login``, ``user.type``
   (``User`` for a person), ``state`` (``APPROVED``, ``CHANGES_REQUESTED``,
   ``DISMISSED``, ``COMMENTED`` or ``PENDING``), ``commit_id``,
-  ``submitted_at``.
+  ``submitted_at``. When ``policy.require_reviewed_head`` is on, the engine
+  also attaches ``edit_state`` from ``review_edit_state``: the raw Markdown
+  ``body`` and ``last_edited_at``, which is None only for a review that was
+  never edited. An adapter never fills ``edit_state`` in ``reviews``.
 - check run: CI evidence for one commit. ``id``, ``name``, ``head_sha``,
   ``status`` (``completed`` when finished), ``conclusion``, ``app.id``. The
   engine counts a required check only when ``app.id`` is
@@ -72,6 +75,18 @@ class Forge(Protocol):
 
     def reviews(self, number: int) -> list[dict[str, Any]]:
         """Every review of the pull request; review requests are not reviews."""
+        ...
+
+    def review_edit_state(self, number: int) -> dict[int, dict[str, Any]]:
+        """The body and the edit state of the reviews, read together, by review id.
+
+        The key is the id that ``reviews`` gives the review. Each value holds
+        ``body``, the raw Markdown, and ``last_edited_at``, None for a review
+        that was never edited. Only a run with ``policy.require_reviewed_head``
+        calls it. An unreadable or malformed answer, or one that cannot be
+        read completely, raises ``ApiError("review_edit_state_unusable")``,
+        and so does a forge that records no edit time.
+        """
         ...
 
     def request(self, path: str) -> Any:

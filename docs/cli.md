@@ -2,8 +2,8 @@
 
 This document is the frozen contract between the action and the repositories
 that consume it. `tests/test_contract.py` pins the parts that can be checked
-mechanically: the action inputs, the policy field set, the modes and the exit
-codes. A change to any of them is a breaking change and needs a new release,
+mechanically: the action inputs, the policy field set, the modes, the exit
+codes, and the field and the codes of [the reviewed head](#the-reviewed-head). A change to any of them is a breaking change and needs a new release,
 not a patch. Before 1.0.0 a breaking change raises the minor version
 (0.1.0 to 0.2.0); the major version is reserved for the first stable release.
 
@@ -55,8 +55,8 @@ python3 scripts/merge_guard.py <mode> [--policy PATH] [--forge FORGE] [--apply] 
 | Code | Meaning |
 | --- | --- |
 | 0 | The run completed. **It does not mean the verdict was positive.** The verdict is carried by the JSON `result` and by the forge status; a gate must never be built on the step's exit code alone |
-| 1 | An operation failed after the inputs were accepted (forge API error, unproven postcondition) |
-| 2 | The inputs are unusable (unreadable or invalid policy, no forge named, no usable Forgejo URL or token, or a write to Forgejo), or a write was attempted outside a trusted workflow context |
+| 1 | An operation failed after the inputs were accepted (forge API error, unproven postcondition, a review edit state that cannot be read: `review_edit_state_unusable`) |
+| 2 | The inputs are unusable (unreadable or invalid policy, no forge named, the reviewed-head rule on Forgejo: `policy_reviewed_head_forge_unsupported`, no usable Forgejo URL or token, or a write to Forgejo), or a write was attempted outside a trusted workflow context |
 
 ## Output
 
@@ -122,6 +122,7 @@ warning: a typo would otherwise silently change which rule runs.
 | | `review_workflow` | Workflow file allowed to publish, `merge-guard-review.yml` by default |
 | | `merge_workflow` | Workflow file allowed to merge, `merge-guard-merge.yml` by default |
 | | `carry_unchanged_diff` | **Deprecated.** Accepted until the clean-refresh release; an approval of an identical patch on a new head inherits nothing when it is off. It is removed by that release, which is a documented breaking change |
+| | `require_reviewed_head` | Off by default. On, an approval counts only when its unedited body ends with `Reviewed-Head: <head>`, from the configured reviewer and from every verified maintainer. It needs `carry_unchanged_diff = false` and a GitHub policy: see [The reviewed head](#the-reviewed-head) |
 | `[paths]` | `ordinary` | Allowlist of paths an authorised merge may touch; anything else is human-only |
 | | `dependency_update_exemption` | Whether a dependency update is ordinary, off by default |
 
@@ -134,6 +135,91 @@ could be a rename that names no old path.
 
 Changing the policy file is a human decision in a consumer repository: it is a
 sensitive path, and so are the workflows that read it.
+
+## The reviewed head
+
+`[review] require_reviewed_head` is a boolean and is `false` by default. While it
+is off, the engine reads no review body and nothing in this section applies. The
+reasons for each rule are in [design/reviewed-head.md](design/reviewed-head.md).
+
+With the switch on, an approval counts for the head only when all of these hold:
+
+- It is the latest decisive review of its submitter, its state is `APPROVED`, and
+  its `commit_id` is the head. The submitter is the configured reviewer, or a
+  user that the API verifies as write, maintain or admin, and is not the pull
+  request author. Every counted approval needs the line, a verified maintainer's
+  too.
+- It passes the timestamp check: an approval that was submitted more than 300
+  seconds before the head's committer date is ignored, as it is with the switch
+  off, and it produces no `reviewed_head_*` code.
+- It was never edited. "Edited" means that the GraphQL field
+  `PullRequestReview.lastEditedAt` of the review is not null. Every edit refuses,
+  the reviewer's own included. The gate does not infer an edit from any other
+  field.
+- Its raw Markdown body ends with the line below, which names the head.
+
+```text
+Reviewed-Head: 0123456789abcdef0123456789abcdef01234567
+```
+
+The gate reads the body and `lastEditedAt` of a review from the same GraphQL
+node, so no edit can fall between two reads, and it reads them again just before
+`merge` merges. It stops at the first step that gives a result:
+
+1. An edited review: `reviewed_head_edited`. The body is not parsed.
+2. Split the body at LF. From each line, remove one trailing CR, then trailing
+   spaces and tabs. Ignore the empty lines at the end.
+3. A line is a *candidate* when, without its leading spaces and tabs, it starts
+   with `reviewed-head`, in any case. No candidate: `reviewed_head_missing`.
+4. More than one candidate, a candidate that is not the last line, or a last line
+   that does not fully match `Reviewed-Head: [0-9a-f]{40}`:
+   `reviewed_head_malformed`. The key has this exact case, one space follows the
+   colon, and the value is 40 lowercase hexadecimal characters.
+5. A value that is not the head: `reviewed_head_mismatch`. Otherwise the line
+   attests the head.
+
+The verdict is the first of these that applies:
+
+1. A change request from a trusted identity: `failure`, `changes_requested`.
+2. An approval that attests the head: `success`, `approved_at_head`.
+3. The `reviewed_head_*` code of the newest approval of the head (the highest
+   review id) that was set aside for its edit or its line: `pending`.
+4. `pending`, `current_head_approval_required`.
+
+A `reviewed_head_*` code applies only to an approval whose `commit_id` is the head.
+An approval of an earlier head keeps `current_head_approval_required`, whatever
+its body says. A draft still reads `pull_request_is_draft`. A bad line is a
+reason for that head, never a refusal of the run, so it cannot block the other
+pull requests. `merge` still needs the configured reviewer's own approval, and
+that approval needs the line too, so an approval of a verified maintainer that
+attests does not merge a pull request by itself
+(`configured_reviewer_required_for_automerge`).
+
+The codes of this rule:
+
+| Code | Where | Meaning |
+| --- | --- | --- |
+| `reviewed_head_missing` | `pending` reason | No line of the approval's body is a candidate |
+| `reviewed_head_malformed` | `pending` reason | The line breaks the grammar or the position rule, or there is more than one candidate |
+| `reviewed_head_mismatch` | `pending` reason | The line is valid and names another commit |
+| `reviewed_head_edited` | `pending` reason | The review was edited after submission |
+| `review_edit_state_unusable` | operation failure, exit 1 | The response that holds the bodies and the edit state is unreadable, is incomplete, or lacks a counted review. `review --apply` then publishes `review_snapshot_unavailable` for the heads it knows |
+| `policy_require_reviewed_head_invalid` | unusable input, exit 2 | The switch is not a boolean |
+| `policy_reviewed_head_requires_carry_off` | unusable input, exit 2 | The switch is on and `carry_unchanged_diff` is absent or `true`. An approval binds to the one head that its line names, so it never carries. This code is retired when the schema drops `carry_unchanged_diff` |
+| `policy_reviewed_head_forge_unsupported` | unusable input, exit 2 | The switch is on and the forge is `forgejo`: this release reads a review's edit state on GitHub only |
+
+`docs/troubleshooting.md` says what to do for each code.
+
+`merge_guard.policy.require_forge` refuses Forgejo once the forge is known, and
+the policy file may leave the forge to `--forge`. The command line therefore
+refuses it before any request.
+
+`require_reviewed_head` is a field of the frozen schema, so adding it is a release,
+not a patch. A release that does not know the field refuses it with
+`policy_unknown_field: review.require_reviewed_head`, and an engine from before
+that check ignores it, so the protection would not run. Add the field to a policy
+file in the same change as the pin of a release that knows it, and let the
+reviewers write the line before you turn the switch on.
 
 ## The forge
 
@@ -289,6 +375,11 @@ Limits of this release:
   so do `review` and `merge` without `--apply`.
 - An approval never carries to a new head. Forgejo returns no per-file patch,
   so the adapter cannot prove an unchanged diff.
+- The reviewed-head rule is not available. A policy with
+  `require_reviewed_head = true` and the forge `forgejo` is refused with
+  `policy_reviewed_head_forge_unsupported`, exit 2, because this release reads
+  the edit state of a review on GitHub only: see [The reviewed
+  head](#the-reviewed-head).
 - While another account has a pending review on an open pull request, every run
   is refused with `forgejo_review_list_incomplete`, exit 1, for all pull
   requests, unless the account of `FORGEJO_TOKEN` is a site administrator:

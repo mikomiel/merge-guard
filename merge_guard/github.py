@@ -19,7 +19,26 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: another transport timeout, and cleanup must leave the job time to report a merge.
 MAX_CLOSING_PAGES = 1
 MAX_PAGES = 10
+#: Reviews per GraphQL page. With MAX_PAGES this reads as many reviews as the
+#: REST list can return (``pages``), so a pull request that the REST read
+#: accepts is not refused by the edit-state read for its size alone.
+REVIEW_EDIT_PAGE_SIZE = 100
 BOT_CREATOR = ("github-actions[bot]", "Bot")
+
+
+def _database_id(value: Any) -> int | None:
+    """A review's id as GraphQL gives it, or None when it is not one.
+
+    ``fullDatabaseId`` is a ``BigInt``, which GraphQL serialises as a decimal
+    string; an integer is read the same way. Anything else, and a string that is
+    not the canonical decimal form of a positive number, is not an id.
+    """
+    if type(value) is int:
+        return value if value >= 1 else None
+    if (isinstance(value, str) and value.isascii() and value.isdigit()
+            and len(value) <= 18 and value[0] != "0"):
+        return int(value)
+    return None
 
 
 class GitHub:
@@ -268,3 +287,100 @@ class GitHub:
             # A missing structure is a broken read, not "this merge closes nothing".
             raise ApiError("closing_issues_unusable")
         return references
+
+    def review_edit_state(self, number: int) -> dict[int, dict[str, Any]]:
+        """The body and the edit state of every review, read together, by review id.
+
+        REST gives a review no edit time, and anyone with write access can edit
+        a review, so the gate reads each review's raw Markdown ``body`` and its
+        ``lastEditedAt`` from one node of one GraphQL answer: no edit can fall
+        between two reads. ``lastEditedAt`` is null only for a review that was
+        never edited. The gate reads that field and never ``userContentEdits``,
+        which also holds the original content once a review has been edited.
+
+        The reviews are paginated, with the same bound as the REST read. Every
+        failure is one refusal, ``review_edit_state_unusable``: a read that
+        failed, timed out or was too large, an answer of another shape, a review
+        named twice, and a list that does not end within the bound. The caller
+        joins the answer to the REST reviews by id, and a missing record is
+        never read as an unedited review.
+        """
+        if type(number) is not int or number < 1:
+            raise ApiError("pull_number_unusable")
+        owner, _, name = self.policy.repository.partition("/")
+        if not owner or not name:
+            raise ApiError("repository_unusable")
+        states: dict[int, dict[str, Any]] = {}
+        cursor: str | None = None
+        for _ in range(MAX_PAGES):
+            reviews = self._review_edit_page(owner, name, number, cursor)
+            nodes = reviews.get("nodes")
+            if not isinstance(nodes, list):
+                raise ApiError("review_edit_state_unusable")
+            for node in nodes:
+                identity, record = self._edit_record(node)
+                if identity in states:
+                    raise ApiError("review_edit_state_unusable")
+                states[identity] = record
+            info = reviews.get("pageInfo")
+            more = info.get("hasNextPage") if isinstance(info, dict) else None
+            if more is False:
+                return states
+            next_cursor = info.get("endCursor") if isinstance(info, dict) else None
+            if more is not True or not isinstance(next_cursor, str) or not next_cursor:
+                raise ApiError("review_edit_state_unusable")
+            cursor = next_cursor
+        raise ApiError("review_edit_state_unusable")
+
+    @staticmethod
+    def _edit_record(node: Any) -> tuple[int, dict[str, Any]]:
+        """One review node as ``(id, {"body", "last_edited_at"})``, or a refusal.
+
+        A node without ``lastEditedAt`` is refused rather than read as unedited:
+        the query always asks for the field, so a response without it is not the
+        answer that was asked for.
+        """
+        identity = _database_id(node.get("fullDatabaseId")) if isinstance(node, dict) else None
+        if identity is None or "lastEditedAt" not in node or not isinstance(node.get("body"), str):
+            raise ApiError("review_edit_state_unusable")
+        edited = node["lastEditedAt"]
+        if edited is not None and (not isinstance(edited, str) or not edited):
+            raise ApiError("review_edit_state_unusable")
+        return identity, {"body": node["body"], "last_edited_at": edited}
+
+    def _review_edit_page(self, owner: str, name: str, number: int,
+                          cursor: str | None) -> dict[str, Any]:
+        """One page of the pull request's reviews, as GitHub answers it."""
+        query = ("query($owner:String!,$name:String!,$number:Int!,$after:String){"
+                 "repository(owner:$owner,name:$name){pullRequest(number:$number){"
+                 "reviews(first:" + str(REVIEW_EDIT_PAGE_SIZE) + ",after:$after){"
+                 "pageInfo{hasNextPage endCursor}"
+                 "nodes{fullDatabaseId body lastEditedAt}}}}}")
+        command = ["gh", "api", "graphql", "--hostname", "github.com",
+                   "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={name}",
+                   "-F", f"number={number}"]
+        if cursor is not None:
+            command += ["-f", f"after={cursor}"]
+        try:
+            completed = subprocess.run(command, text=True, capture_output=True,
+                                       timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ApiError("review_edit_state_unusable") from exc
+        if completed.returncode != 0 or len(completed.stdout.encode()) > MAX_RESPONSE_BYTES:
+            raise ApiError("review_edit_state_unusable")
+        try:
+            payload = json.loads(completed.stdout)
+        except (ValueError, RecursionError) as exc:
+            # ValueError covers a decode error and an integer past Python's digit
+            # limit; RecursionError a body nested past the recursion limit.
+            raise ApiError("review_edit_state_unusable") from exc
+        if not isinstance(payload, dict) or payload.get("errors"):
+            # An answer that carries errors is partial at best: never read it.
+            raise ApiError("review_edit_state_unusable")
+        data = payload.get("data")
+        repository = data.get("repository") if isinstance(data, dict) else None
+        pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+        reviews = pull.get("reviews") if isinstance(pull, dict) else None
+        if not isinstance(reviews, dict):
+            raise ApiError("review_edit_state_unusable")
+        return reviews

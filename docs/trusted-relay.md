@@ -64,11 +64,20 @@ association observed in practice, where the forge reassigned a review to a head
 created 34 minutes after it was submitted (#15). It cannot establish what the
 reviewer read: a committer date is chosen by whoever creates the commit, so a
 head authored with a backdated date defeats the comparison. Closing that gap
-needs an assurance the forge does not own, and this gate does not yet require
-one. [design/reviewed-head.md](design/reviewed-head.md) compares the options
-and proposes one (issue #20): the approving review ends with a
-`Reviewed-Head:` line that names the head it read, behind a policy switch that
-is off by default.
+needs an assurance the forge does not own, and this gate requires one only
+when a policy turns on `require_reviewed_head`, which is off by default.
+[design/reviewed-head.md](design/reviewed-head.md) compares the options and
+records the decision (issue #20): the approving review ends with a
+`Reviewed-Head:` line that names the head it read, and the gate refuses an
+approval whose body was ever edited.
+
+With the switch on, the evidence is the reviewer's statement, not the forge's
+association. That proves that the holder of the reviewer credential named this
+commit in a review that nobody edited. It does not prove that anyone read the
+change with care, and it is as strong as the reviewer credential, the SHA that
+the reviewer service writes, and the forge's record of edits. This release reads
+that record on GitHub only: a Forgejo policy with the switch on is refused.
+[cli.md](cli.md#the-reviewed-head) owns the rule.
 
 `commit_id` alone is not trusted. The forge can reassign it to a commit that did
 not exist at submission time, and `original_commit_id` is `null` in observed
