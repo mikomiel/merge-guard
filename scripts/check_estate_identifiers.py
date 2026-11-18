@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache"}
@@ -86,8 +87,19 @@ def tracked_files() -> list[Path]:
     ]
 
 
-def main() -> int:
-    rules = RULES + extra_rules()
+def scan_lines(
+    lines: Iterable[str], source: str | Path, rules: list[tuple[str, re.Pattern[str]]]
+) -> int:
+    findings = 0
+    for number, line in enumerate(lines, 1):
+        for name, pattern in rules:
+            if pattern.search(line):
+                print(f"{source}:{number}: {name}")
+                findings += 1
+    return findings
+
+
+def scan_tracked_files(rules: list[tuple[str, re.Pattern[str]]]) -> int:
     findings = 0
     for path in tracked_files():
         if path.suffix.lower() in SKIP_SUFFIXES or set(path.parts) & SKIP_DIRS:
@@ -96,11 +108,21 @@ def main() -> int:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for number, line in enumerate(text.splitlines(), 1):
-            for name, pattern in rules:
-                if pattern.search(line):
-                    print(f"{path}:{number}: {name}")
-                    findings += 1
+        findings += scan_lines(text.splitlines(), path, rules)
+    return findings
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args not in ([], ["--stdin"]):
+        print("usage: check_estate_identifiers.py [--stdin]", file=sys.stderr)
+        return 2
+    rules = RULES + extra_rules()
+    if args:
+        lines = (line.decode("utf-8", errors="replace") for line in sys.stdin.buffer)
+        findings = scan_lines(lines, "stdin", rules)
+    else:
+        findings = scan_tracked_files(rules)
     if findings:
         print(f"{findings} finding(s); this content must not be public", file=sys.stderr)
         return 1
