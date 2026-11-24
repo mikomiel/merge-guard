@@ -9,13 +9,17 @@ TOML rule file that the classifier validates before it uses it, so a repository
 changes its policy by supplying a file, not by editing code.
 
 With no file supplied the classifier uses the reference rule set,
-`scripts/reference-rules.toml`. That is the policy the classifier was extracted
-with, kept as it was so its results do not change. It is one repository's
-layout, not a recommended default. A repository with another layout supplies its
-own file; the [worked example](#a-worked-example) below is not the reference
-layout. `tests/test_classifier_parity.py` pins that supplying the reference file
+`scripts/reference-rules.toml`. It is an example layout, not a recommended
+default: a synthetic monorepo, described under [The reference set](#the-reference-set).
+In v0.4.0 and every release before it, the reference set was the layout of the
+repository the classifier was extracted from. If your repository relied on that
+default, supply your own file. Nothing fails if you skip this: the script exits 0
+and prints fewer rows, and a path that your old rule file put in C1 takes the C2
+default. [docs/pin-bump.md](pin-bump.md#bumping) has the steps, and the
+[worked example](#a-worked-example) below is a smaller place to start.
+`tests/test_classifier_parity.py` pins that supplying the reference file
 explicitly reports the same rows as supplying nothing, and that both reproduce,
-byte for byte, what the classifier printed before its rules became data
+byte for byte, the output recorded for it
 (`tests/fixtures/classifier-golden-rows.txt`).
 
 ## What a rule file decides
@@ -74,11 +78,10 @@ route = assurance.assurance_route_for(result.gate_class, paths, rules=rules)
 ```
 
 `classify_change`, `c1_path_rules_by_path` and `assurance_route_for` take an
-optional `rules=`; `None`, the default, is the reference set, so a caller that
-supplies nothing sees no change. `load_rules` reads and parses a file;
-`validate_rules` checks a table that is already parsed. Both return the same
-validated `Rules` and raise `RulesUnusable` with a reason from the
-[refusal table](#refusal-reasons).
+optional `rules=`; `None`, the default, is the reference set. `load_rules` reads
+and parses a file; `validate_rules` checks a table that is already parsed. Both
+return the same validated `Rules` and raise `RulesUnusable` with a reason from
+the [refusal table](#refusal-reasons).
 
 Read the rule file from the base branch, not from the change being classified. A
 file taken from the change lets that change delete the rule that would escalate
@@ -286,7 +289,17 @@ $ echo $?
 ## The reference set
 
 `scripts/reference-rules.toml` is the rule set that runs when no file is
-supplied. Its rule ids and the reasons in its comments belong to the policy of
-the repository the classifier was extracted from. Read it as a larger example
-of the same format, not as a layout to adopt. The C3 allowlists in it are
-empty.
+supplied. It is an example: the layout of a synthetic monorepo, with apps under
+`apps/`, service code under `services/`, shared scripts and configuration under
+`shared/`, a tool configuration under `tools-config/` and host automation under
+`infra/`. Read it as a larger example of the same format, not as a layout to
+adopt. The C3 allowlists in it are empty.
+
+In v0.4.0 and every release before it, the reference set was the layout of the
+repository the classifier was extracted from. The release after it replaced that
+layout with this one and renamed two rule ids: `C1-ANSIBLE-RUNTIME` is now
+`C1-AUTOMATION-RUNTIME` and `C1-NETWORK-PVE` is now `C1-NETWORK-HYPERVISOR`. If
+your repository classified with the default, follow the steps in
+[docs/pin-bump.md](pin-bump.md#bumping). Nothing fails if you skip this: the
+script exits 0 and prints fewer rows, and a path that your old rule file put in
+C1 takes the C2 default.

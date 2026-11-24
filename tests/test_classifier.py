@@ -6,9 +6,9 @@ belongs to whoever calls this module; the classifier never reads them itself.
 The one exception is the entrypoint class at the end, which pins the line
 format a caller that executes this file depends on.
 
-The rule IDs and the section labels in these docstrings are the vocabulary of
-the policy this classifier was extracted from. See the module docstring's
-provenance note.
+The paths and rule IDs are the example layout of ``scripts/reference-rules.toml``.
+The section labels in these docstrings are the vocabulary of the specification
+this classifier was extracted from; see the module docstring's provenance note.
 """
 
 from __future__ import annotations
@@ -27,24 +27,24 @@ class ClassifyChangeC1PathRuleTests(unittest.TestCase):
         return assurance.classify_change(frozenset(paths), [])
 
     def test_gate_authority_shim(self):
-        result = self._classify({"opencode-config/scripts/git_maintainer_gate.py"})
+        result = self._classify({"tools-config/scripts/gate_cli.py"})
         self.assertEqual(result.gate_class, "C1")
         self.assertIn("C1-GATE-AUTHORITY", result.matched_rule_ids)
 
     def test_gate_authority_package(self):
-        result = self._classify({"opencode-config/scripts/git_gate/catalog.py"})
+        result = self._classify({"tools-config/scripts/gate/catalog.py"})
         self.assertEqual(result.gate_class, "C1")
         self.assertIn("C1-GATE-AUTHORITY", result.matched_rule_ids)
 
-    def test_gate_authority_mcp_adapter(self):
-        result = self._classify({"MCPs/servers/git_maintainer_gate_mcp.py"})
+    def test_gate_authority_server(self):
+        result = self._classify({"services/servers/gate_server.py"})
         self.assertIn("C1-GATE-AUTHORITY", result.matched_rule_ids)
 
     def test_gate_authority_classifier_file_itself(self):
         """§15 negative test: the classifier changing its own rules is
-        C1-triggering -- covered by the git_gate/ prefix, not a special case,
+        C1-triggering -- covered by the gate/ prefix, not a special case,
         but named explicitly since §15 lists it as its own required test."""
-        result = self._classify({"opencode-config/scripts/git_gate/assurance.py"})
+        result = self._classify({"tools-config/scripts/gate/assurance.py"})
         self.assertEqual(result.gate_class, "C1")
         self.assertIn("C1-GATE-AUTHORITY", result.matched_rule_ids)
 
@@ -52,25 +52,21 @@ class ClassifyChangeC1PathRuleTests(unittest.TestCase):
         result = self._classify({"repos.yaml"})
         self.assertEqual(result.matched_rule_ids, ("C1-REPOSITORY-AUTHORITY",))
 
-    def test_the_github_workflow_path_is_no_longer_ci_trust(self):
-        """FJ-06 subtracted GitHub Actions: the offsite copy runs no CI the
-        gate can read, so its workflow path takes the C2 default. The
-        Forgejo path below carries the C1-CI-TRUST rule now."""
+    def test_the_github_workflow_path_is_not_ci_trust(self):
+        """The pull-request CI of the example layout runs from
+        .forgejo/workflows/, so a .github/workflows/ path takes the C2
+        default. The Forgejo path below carries the C1-CI-TRUST rule."""
         result = self._classify({".github/workflows/checks.yml"})
         self.assertEqual(result.gate_class, "C2")
         self.assertNotIn("C1-CI-TRUST", result.matched_rule_ids)
 
     def test_ci_trust_recognises_the_live_forgejo_workflow(self):
-        """The authoritative CI entrypoint is the Forgejo one (FJ-01).
+        """The workflow that judges a pull request is C1.
 
-        Since the authority flip, `.forgejo/workflows/checks.yml` is the
-        workflow that judges a pull request on the writable forge. While the
-        rule listed only the GitHub prefix, editing the live workflow took
-        the C2 default -- the strongest assurance class stopped covering the
-        trust boundary it exists for, silently, at the moment authority
-        moved. FJ-06 removed the GitHub prefix with GitHub Actions (the
-        workflows were deleted; the offsite copy runs none the gate can
-        read), so the Forgejo prefix is the whole rule.
+        `.forgejo/workflows/checks.yml` is the workflow that judges a pull
+        request on the forge. If editing it took the C2 default, the
+        strongest assurance class would stop covering the trust boundary it
+        exists for, silently. The Forgejo prefix is the whole rule.
         """
         result = self._classify({".forgejo/workflows/checks.yml"})
         self.assertEqual(result.gate_class, "C1")
@@ -78,37 +74,36 @@ class ClassifyChangeC1PathRuleTests(unittest.TestCase):
 
     def test_ci_trust_does_not_sweep_the_whole_forgejo_directory(self):
         """A prefix, not the dot-directory: sibling Forgejo configuration that
-        is not a workflow keeps the C2 default, matching how the GitHub prefix
-        has always behaved."""
+        is not a workflow keeps the C2 default."""
         result = self._classify({".forgejo/issue_template.md"})
         self.assertEqual(result.gate_class, "C2")
         self.assertNotIn("C1-CI-TRUST", result.matched_rule_ids)
 
     def test_ci_trust_repository_ci_entrypoint(self):
-        """The repository-owned CI entrypoint is C1 (FJ-01 §7).
+        """The repository-owned CI entrypoint is C1.
 
-        scripts/ci-profile is the single definition CI, a terminal and the
-        OpenCode agents all call (WCI-02 3.1), and the workflows invoke it —
-        changing it changes what CI trusts, exactly like a workflow change.
+        scripts/run-checks is the single definition that CI and a terminal
+        both call, and the workflows invoke it. Changing it changes what CI
+        trusts, exactly like a workflow change.
         """
-        result = self._classify({"scripts/ci-profile"})
+        result = self._classify({"scripts/run-checks"})
         self.assertEqual(result.gate_class, "C1")
         self.assertEqual(result.matched_rule_ids, ("C1-CI-TRUST",))
 
     def test_ci_trust_covers_what_the_entrypoint_runs_under(self):
         """The entrypoint's own machinery is CI trust, not ordinary code.
 
-        scripts/validation-env is sourced by ci-profile and owns the
-        environment every check runs under; scripts/validation_lease.py gates
+        scripts/check-env is sourced by run-checks and owns the
+        environment every check runs under; scripts/check_lease.py gates
         every pytest check through the conftest adapters. A change to either
         changes what the trusted entrypoint does, so neither can sit at the
-        C2 default while ci-profile is C1.
+        C2 default while run-checks is C1.
         """
         for path in (
-            "scripts/validation-env",
-            "scripts/validation_lease.py",
-            "scripts/node-install-fresh.sh",
-            "scripts/toolgate.py",
+            "scripts/check-env",
+            "scripts/check_lease.py",
+            "scripts/refresh-deps.sh",
+            "scripts/tool_policy.py",
         ):
             with self.subTest(path=path):
                 result = self._classify({path})
@@ -122,96 +117,96 @@ class ClassifyChangeC1PathRuleTests(unittest.TestCase):
         default; the entrypoint rule must not silently absorb the whole
         directory it lives in.
         """
-        result = self._classify({"scripts/change-digest"})
+        result = self._classify({"scripts/format-code"})
         self.assertEqual(result.gate_class, "C2")
         self.assertNotIn("C1-CI-TRUST", result.matched_rule_ids)
 
     def test_ci_trust_entrypoint_mixed_with_sibling_is_still_c1(self):
         """A change touching both the entrypoint and an ordinary script is
         C1 by the mixed-change combining rule."""
-        result = self._classify({"scripts/ci-profile", "scripts/change-digest"})
+        result = self._classify({"scripts/run-checks", "scripts/format-code"})
         self.assertEqual(result.gate_class, "C1")
         self.assertIn("C1-CI-TRUST", result.matched_rule_ids)
 
     def test_secrets_permissions_credential_routing(self):
-        result = self._classify({"platform/config/credential-routing.yaml"})
+        result = self._classify({"shared/config/secret-sources.yaml"})
         self.assertEqual(result.matched_rule_ids, ("C1-SECRETS-PERMISSIONS",))
 
-    def test_secrets_permissions_claude_settings(self):
-        for path in (".claude/settings.json", "harnesses/claude/settings.json"):
+    def test_secrets_permissions_settings_files(self):
+        for path in (".claude/settings.json", "apps/web/settings.json"):
             with self.subTest(path=path):
                 result = self._classify({path})
                 self.assertEqual(result.matched_rule_ids, ("C1-SECRETS-PERMISSIONS",))
 
-    def test_network_pve_pve_prefix(self):
-        result = self._classify({"MCPs/servers/pve_broker_worker.py"})
-        self.assertEqual(result.matched_rule_ids, ("C1-NETWORK-PVE",))
+    def test_network_hypervisor_vm_prefix(self):
+        result = self._classify({"services/servers/vm_broker_worker.py"})
+        self.assertEqual(result.matched_rule_ids, ("C1-NETWORK-HYPERVISOR",))
 
-    def test_deploy_activate_oc_deploy(self):
-        result = self._classify({"opencode-config/scripts/oc_deploy.py"})
+    def test_deploy_activate_deploy_script(self):
+        result = self._classify({"tools-config/scripts/deploy.py"})
         self.assertEqual(result.matched_rule_ids, ("C1-DEPLOY-ACTIVATE",))
 
-    def test_deploy_activate_deploy_chain_prefix(self):
-        result = self._classify({"opencode-config/scripts/deploy_chain/planning.py"})
+    def test_deploy_activate_rollout_prefix(self):
+        result = self._classify({"tools-config/scripts/rollout/planning.py"})
         self.assertEqual(result.matched_rule_ids, ("C1-DEPLOY-ACTIVATE",))
 
-    def test_ansible_runtime_role_change(self):
-        result = self._classify({"ansible-homelab/roles/pve_firewall/tasks/main.yml"})
-        self.assertEqual(result.matched_rule_ids, ("C1-ANSIBLE-RUNTIME",))
+    def test_automation_runtime_role_change(self):
+        result = self._classify({"infra/roles/vm_firewall/tasks/main.yml"})
+        self.assertEqual(result.matched_rule_ids, ("C1-AUTOMATION-RUNTIME",))
 
-    def test_moved_pi_role_input_keeps_ansible_runtime_class(self):
-        result = self._classify({"harnesses/pi/role/templates/settings.json.j2"})
-        self.assertEqual(result.matched_rule_ids, ("C1-ANSIBLE-RUNTIME",))
-        extension = self._classify({"harnesses/pi/extensions/todo.js"})
+    def test_automation_runtime_mobile_role_input(self):
+        result = self._classify({"apps/mobile/role/templates/settings.json.j2"})
+        self.assertEqual(result.matched_rule_ids, ("C1-AUTOMATION-RUNTIME",))
+        extension = self._classify({"apps/mobile/extensions/widget.js"})
         self.assertEqual(extension.gate_class, "C2")
 
-    def test_moved_codex_inputs_keep_ansible_runtime_class(self):
+    def test_automation_runtime_api_and_worker_role_inputs(self):
         for path in (
-            "harnesses/codex/role/templates/config.toml.j2",
-            "harnesses/codex/role/files/requirements.toml",
-            "harnesses/codex/role/vars/main.yml",
-            "harnesses/deepseek/role/templates/cordis.patch.yml.j2",
-            "harnesses/deepseek/role/templates/delegate-worker.patch.yml.j2",
+            "apps/api/role/templates/config.toml.j2",
+            "apps/api/role/files/requirements.toml",
+            "apps/api/role/vars/main.yml",
+            "apps/worker/role/templates/base.patch.yml.j2",
+            "apps/worker/role/templates/queue.patch.yml.j2",
         ):
             with self.subTest(path=path):
                 result = self._classify({path})
-                self.assertEqual(result.matched_rule_ids, ("C1-ANSIBLE-RUNTIME",))
+                self.assertEqual(result.matched_rule_ids, ("C1-AUTOMATION-RUNTIME",))
 
-    def test_ansible_runtime_exempts_tests_only(self):
-        result = self._classify({"ansible-homelab/tests/test_role_contracts.py"})
+    def test_automation_runtime_exempts_tests_only(self):
+        result = self._classify({"infra/tests/test_roles.py"})
         self.assertEqual(result.gate_class, "C2")
 
-    def test_moved_claude_inputs_preserve_prior_classification(self):
+    def test_automation_runtime_web_role_inputs_not_web_scripts(self):
         for path in (
-            "harnesses/claude/role/templates/macos-settings.json.j2",
-            "harnesses/claude/role/files/managed-rules.json",
-            "harnesses/claude/role/files/claude/settings.local.json",
+            "apps/web/role/templates/desktop-settings.json.j2",
+            "apps/web/role/files/access-rules.json",
+            "apps/web/role/files/web/settings.local.json",
         ):
             with self.subTest(path=path):
                 result = self._classify({path})
-                self.assertEqual(result.matched_rule_ids, ("C1-ANSIBLE-RUNTIME",))
+                self.assertEqual(result.matched_rule_ids, ("C1-AUTOMATION-RUNTIME",))
         for path in (
-            "harnesses/claude/scripts/mcp_auto_allow.py",
-            "harnesses/claude/scripts/managed_checkout_guard.py",
-            "harnesses/claude/scripts/memory_writeback.py",
-            "harnesses/claude/role/files/claude/agents/coder.md",
+            "apps/web/scripts/build.py",
+            "apps/web/scripts/lint.py",
+            "apps/web/scripts/serve.py",
+            "apps/web/role/files/web/agents/helper.md",
         ):
             with self.subTest(path=path):
                 self.assertEqual(self._classify({path}).gate_class, "C2")
 
-    def test_ansible_runtime_exempts_docs_only(self):
-        result = self._classify({"ansible-homelab/README.md"})
+    def test_automation_runtime_exempts_docs_only(self):
+        result = self._classify({"infra/README.md"})
         self.assertEqual(result.gate_class, "C2")
 
-    def test_ansible_runtime_mixed_test_and_role_still_c1(self):
+    def test_automation_runtime_mixed_test_and_role_still_c1(self):
         """One non-exempt path escalates the whole change, per §7.5's
         "mixed changes containing any C1 trigger" combining rule."""
         result = self._classify({
-            "ansible-homelab/tests/test_role_contracts.py",
-            "ansible-homelab/roles/pve_firewall/tasks/main.yml",
+            "infra/tests/test_roles.py",
+            "infra/roles/vm_firewall/tasks/main.yml",
         })
         self.assertEqual(result.gate_class, "C1")
-        self.assertIn("C1-ANSIBLE-RUNTIME", result.matched_rule_ids)
+        self.assertIn("C1-AUTOMATION-RUNTIME", result.matched_rule_ids)
 
     def test_multiple_rules_all_reported(self):
         result = self._classify({"repos.yaml", ".forgejo/workflows/checks.yml"})
@@ -302,7 +297,7 @@ class ClassifyChangeDefaultC2Tests(unittest.TestCase):
 
     def test_ordinary_source_file_is_default_c2(self):
         result = assurance.classify_change(
-            frozenset({"MCPs/servers/knowledge_mcp.py"}), []
+            frozenset({"services/servers/search_server.py"}), []
         )
         self.assertEqual(result.gate_class, "C2")
         self.assertEqual(result.matched_rule_ids, ("DEFAULT-C2",))
@@ -362,7 +357,7 @@ class AssuranceRouteTests(unittest.TestCase):
     def test_c2_openspec_prefix_counts_as_doc_only(self):
         self.assertEqual(
             assurance.assurance_route_for(
-                "C2", frozenset({"opencode-config/openspec/changes/x/tasks.md"})
+                "C2", frozenset({"tools-config/openspec/changes/x/tasks.md"})
             ),
             "review",
         )
@@ -370,14 +365,14 @@ class AssuranceRouteTests(unittest.TestCase):
     def test_c2_mixed_code_and_docs_is_tests_and_review(self):
         self.assertEqual(
             assurance.assurance_route_for(
-                "C2", frozenset({"README.md", "opencode-config/scripts/foo.py"})
+                "C2", frozenset({"README.md", "tools-config/scripts/foo.py"})
             ),
             "tests_and_review",
         )
 
     def test_c2_code_only_is_tests_and_review_default(self):
         self.assertEqual(
-            assurance.assurance_route_for("C2", frozenset({"opencode-config/scripts/foo.py"})),
+            assurance.assurance_route_for("C2", frozenset({"tools-config/scripts/foo.py"})),
             "tests_and_review",
         )
 
@@ -509,12 +504,12 @@ class EntryPointTests(unittest.TestCase):
 
     def test_one_row_per_matching_path_and_rule(self):
         status, rows = self._run([
-            "opencode-config/scripts/git_gate/assurance.py\n",
+            "tools-config/scripts/gate/assurance.py\n",
             "README.md\n",
         ])
         self.assertEqual(status, 0)
         self.assertEqual(rows, [
-            "C1-GATE-AUTHORITY\topencode-config/scripts/git_gate/assurance.py",
+            "C1-GATE-AUTHORITY\ttools-config/scripts/gate/assurance.py",
         ])
 
     def test_blank_lines_and_whitespace_are_not_paths(self):
@@ -523,13 +518,13 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_every_matching_rule_is_printed_for_one_path(self):
-        status, rows = self._run(["platform/scripts/git_gate/ci.py\n"])
+        status, rows = self._run(["shared/scripts/gate/ci.py\n"])
         self.assertEqual(status, 0)
         self.assertTrue(rows)
         for row in rows:
             rule, path = row.split("\t")
             self.assertTrue(rule.startswith("C1-"))
-            self.assertEqual(path, "platform/scripts/git_gate/ci.py")
+            self.assertEqual(path, "shared/scripts/gate/ci.py")
 
 
 if __name__ == "__main__":

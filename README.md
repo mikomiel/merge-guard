@@ -72,11 +72,14 @@ it does not write to Forgejo in this release. [docs/cli.md](docs/cli.md#forgejo)
 covers the setup and the limits.
 
 The classifier's rules are data. With none supplied it applies the reference
-rule set it ships with, `scripts/reference-rules.toml`; a repository with another
-layout supplies its own file, and `scripts/assurance.py --rules FILE` refuses a
-file it cannot use. [docs/classifier-rules.md](docs/classifier-rules.md) documents
-the format and every refusal reason, with a worked example in
-`examples/classifier-rules.toml`.
+rule set it ships with, `scripts/reference-rules.toml`, an example layout. In
+v0.4.0 and every release before it, that file held the layout of the repository
+the classifier was extracted from. A repository supplies its own file, and
+`scripts/assurance.py --rules FILE` refuses a file it cannot use. Nothing fails
+if you skip this: the script exits 0 and prints fewer rows, and a path that your
+old rule file put in C1 takes the C2 default.
+[docs/classifier-rules.md](docs/classifier-rules.md) documents the format and
+every refusal reason, with a worked example in `examples/classifier-rules.toml`.
 
 ## Carried approvals
 

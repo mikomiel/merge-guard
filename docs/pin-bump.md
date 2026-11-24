@@ -199,6 +199,27 @@ classifier's place. A consumer that kept the classifier flat, at
 `<vendor root>/assurance.py`, moves it to `<vendor root>/scripts/assurance.py`
 with `reference-rules.toml` beside it, and changes its loader in the same bump.
 
+The first bump past v0.4.0 changes the classifier's default. Its
+`reference-rules.toml` becomes an example layout and two of its rule ids are
+renamed ([docs/classifier-rules.md](classifier-rules.md#the-reference-set)). If
+you classified without `--rules`, with `rules=None`, or with `--rules` pointing
+at the vendored `reference-rules.toml`, take these steps. Nothing fails if you
+skip this: the script exits 0 and prints fewer rows, and a path that your old
+rule file put in C1 takes the C2 default.
+
+1. **Keep your rules.** Before the bump, copy the `scripts/reference-rules.toml`
+   that you vendored at v0.4.0 to a path outside the vendor root, so that a bump
+   cannot replace it. The copy keeps your classes and rule ids.
+2. **Pass that file.** After the bump, pass it with `--rules FILE` or `rules=` on
+   every call. Do not pass the vendored `reference-rules.toml`: after the bump it
+   is the example layout.
+3. **Protect that file.** Read it from the base branch, as
+   [Supplying a rule file](classifier-rules.md#supplying-a-rule-file) says, and
+   keep a C1 rule for its own path, as
+   [A worked example](classifier-rules.md#a-worked-example) shows.
+4. **Check the result.** Classify one path that your old file put in C1, and
+   confirm that it is still C1 with the same rule id.
+
 ## Bumping this repository's own gate
 
 This repository runs its own gate, and the release is pinned in one line:

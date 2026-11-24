@@ -1,7 +1,7 @@
 """The classifier's policy is data: the rule file format, its validator, and what a
 supplied file does.
 
-``tests/test_classifier.py`` pins how the reference set classifies, unchanged.
+``tests/test_classifier.py`` pins how the reference set classifies.
 This file pins the seam around it: every way a rule file is refused, that a
 supplied file replaces the reference set instead of extending it, that an
 unusable file never falls back to a weaker answer, and that the documentation
@@ -492,14 +492,14 @@ def test_an_id_of_only_whitespace_is_empty_not_padded(rule_id):
 
 # The reference set and the worked example.
 
-def test_the_reference_file_is_usable_and_keeps_its_published_ids():
+def test_the_reference_file_is_usable_and_names_its_rule_ids():
     rules = assurance.load_rules(assurance.REFERENCE_RULES_PATH)
     assert sorted(rule.rule_id for rule in rules.path_rules) == [
-        "C1-ANSIBLE-RUNTIME",
+        "C1-AUTOMATION-RUNTIME",
         "C1-CI-TRUST",
         "C1-DEPLOY-ACTIVATE",
         "C1-GATE-AUTHORITY",
-        "C1-NETWORK-PVE",
+        "C1-NETWORK-HYPERVISOR",
         "C1-REPOSITORY-AUTHORITY",
         "C1-SECRETS-PERMISSIONS",
     ]
@@ -828,7 +828,7 @@ def test_without_arguments_the_entry_point_uses_the_reference_set(capsys):
 
 
 def _run_script(tmp_path, stdin, *argv):
-    """The script as ``ci-profile`` runs it: isolated, from another directory."""
+    """The script as a CI entrypoint runs it: isolated, from another directory."""
     return subprocess.run(
         [sys.executable, "-I", str(SCRIPT), *argv], input=stdin, cwd=tmp_path,
         capture_output=True, text=True, check=False,

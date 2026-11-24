@@ -1,9 +1,9 @@
-"""GT-01 §7: conservative, deterministic R×C change classifier.
+"""Specification §7: conservative, deterministic R×C change classifier.
 
-Per GT-01 §5.1: consumes only changed paths and bounded structured diff
+Per specification §5.1: consumes only changed paths and bounded structured diff
 shape -- never executes code from the changed branch to classify itself
 (§7.5's own constraint), never imports an operation module, and never
-reads ``fleet_deploy`` (that stays ``deploy_chain/catalog.py``'s concern,
+reads ``fleet_deploy`` (that stays the deploy catalog's concern,
 same as ``catalog.load_repository_control_policy``).
 
 **Mechanism and policy.** This module is the mechanism: how a changed-path set
@@ -12,8 +12,8 @@ paths escalate to C1, which paths count as documentation, which files C3 may
 narrow -- is data in a TOML rule file, checked by :func:`validate_rules` and
 documented in ``docs/classifier-rules.md``. A caller supplies its own file with
 ``rules=`` (``--rules`` on the command line). With none supplied the reference
-set beside this module, ``reference-rules.toml``, is used, so the default is the
-policy this module was extracted with and its results do not change.
+set beside this module, ``reference-rules.toml``, is used: an example layout, not
+a policy to adopt.
 
 The classification functions are pure: each takes already-derived facts
 (changed paths, raw diff-shape lines, a :class:`Rules`) and returns a result.
@@ -23,8 +23,8 @@ with :class:`RulesUnusable`, never with a fallback; run as a script, the same
 failure is the command line's refusal (see :func:`main`).
 
 Deriving the facts from the current worktree is
-``forge.py``'s ``policy()`` operation (GT-01 2.4), matching how
-``git_gate/repository.py``'s ``_lane_changed_paths`` already derives the
+``forge.py``'s ``policy()`` operation (specification 2.4), matching how
+the gate's changed-path helper, ``_lane_changed_paths``, already derives the
 changed-path list this module classifies.
 
 Rule design notes, since §7.5 states the *conditions* but leaves several
@@ -39,7 +39,7 @@ what the mechanism does with any rule set:
   matching id is reported, so the order of the rules never changes a result.
 - **"Unbounded generated-output" and "missing-base"** are both projections
   of ``_lane_changed_paths`` returning ``None`` (unreadable, or over
-  ``LANE_CHANGED_PATHS_MAX`` per GF-05C's existing collision-forecast
+  ``LANE_CHANGED_PATHS_MAX`` per the gate's existing collision-forecast
   bound) -- reusing the bound this package already enforces elsewhere
   rather than inventing a second one, and treating "cannot compute changed
   paths" as itself C1-triggering rather than a separate failure path,
@@ -81,16 +81,17 @@ what the mechanism does with any rule set:
   classify itself, and "pass" cannot be determined any other way. It is
   enforced procedurally instead, by the same standing rule every other
   change in this repository already follows -- nothing merges without the
-  pinned test suite green (``git_gate/README.md``'s verification method) --
+  pinned test suite green (the gate's verification method) --
   not by a fifth algorithmic condition here.
 
-**Extraction provenance.** The rule identifiers and the path data in
-``reference-rules.toml`` are the policy of the estate this module was extracted
-from, not a general default: they are the reference set, kept so the
-classification can still be diffed against the copy it replaced, and a consumer
-with another layout supplies its own file instead. The module was moved here
-with its behaviour unchanged, and the path data was moved out of it into that
-file without changing a result.
+**Extraction provenance.** The module was moved here with its behaviour
+unchanged, and its path data was moved out of it into ``reference-rules.toml``
+without changing a result. The section labels in these docstrings are those of
+the specification it was written against, and a file or function these
+docstrings name that this repository does not hold belongs to the repository it
+was extracted from. In v0.4.0 and every release before it, the reference file
+held the layout of that repository; it is now an example layout, and a consumer
+that relied on that default supplies its own file.
 """
 
 from __future__ import annotations
@@ -378,8 +379,8 @@ def _refuse(reason: RulesUnusable) -> int:
     return 2
 
 
-#: The reference rule set: the policy this module was extracted with. It sits
-#: beside this file, so a copy of the module needs a copy of the file.
+#: The reference rule set, an example layout. It sits beside this file, so a copy
+#: of the module needs a copy of the file.
 REFERENCE_RULES_PATH = Path(__file__).resolve().with_name("reference-rules.toml")
 try:
     _REFERENCE_RULES = load_rules(REFERENCE_RULES_PATH)
@@ -462,9 +463,9 @@ def c1_path_rules_by_path(
     Evaluated one path at a time: every path rule is per-path (a rule's
     exemptions need *some* non-exempt path, which a single path satisfies on its
     own), so the union over single-path calls equals the whole-set verdict.
-    Shared with ``scripts/ci-profile``, which escalates a pull-request run to
-    the full manifest for any path listed here; that script runs this module
-    as ``python3 -I assurance.py`` and never copies the rule lists.
+    A CI entrypoint can escalate a pull-request run to its full set of checks
+    for any path listed here: it runs this module as ``python3 -I assurance.py``
+    and never copies the rule lists.
 
     *rules* is the rule set to match against; ``None`` is the reference set.
     """
@@ -662,7 +663,7 @@ def required_check_profile_for(change_class: str, ci_applicability: str) -> str 
     statement about review, and reading it as permission to accept weaker CI
     evidence would lower a trust-boundary minimum to tidy an inconsistency
     that is not one. Recorded here because the separation reads like an
-    oversight otherwise: HB-937 was filed on exactly that reading, before
+    oversight otherwise: an issue was filed on exactly that reading, before
     the two spec sections were compared. Keep them independent.
     """
 

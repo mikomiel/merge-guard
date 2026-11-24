@@ -1,10 +1,10 @@
 """Supplying the reference rule file changes nothing the classifier reports, and the
-reference rule set reports what the classifier reported before its rules were data.
+reference rule set reports the output recorded for it.
 
-``scripts/reference-rules.toml`` is the policy the classifier ran with before its
-rules became data, and the rule set it uses when none is supplied. Supplying that
-file explicitly must report the same class, rule ids, rows and route as supplying
-nothing. Four layers pin it, each at a different distance from the caller:
+``scripts/reference-rules.toml`` is an example layout, and the rule set the
+classifier uses when none is supplied. Supplying that file explicitly must report
+the same class, rule ids, rows and route as supplying nothing. Four layers pin it,
+each at a different distance from the caller:
 
 * every call that ``tests/test_classifier.py`` makes, with that file unmodified,
   is repeated with the file supplied and the two results are compared;
@@ -12,17 +12,17 @@ nothing. Four layers pin it, each at a different distance from the caller:
   misses, is classified both ways in process;
 * ``scripts/assurance.py`` run the way a caller runs it, ``python3 -I`` from
   another directory, prints the same rows both ways;
-* the output of the classifier as it was released, stored under
-  ``tests/fixtures/``, is reproduced byte for byte, with the default rules and
-  with the reference file supplied, over a stored set of paths that reaches every
-  reference rule and every route.
+* the recorded output for that sweep, stored under ``tests/fixtures/``, is
+  reproduced byte for byte, with the default rules and with the reference file
+  supplied, over a stored set of paths that reaches every reference rule and
+  every route.
 
 The first three compare two ways of running the same code, so they catch drift in
 how a supplied rule set is read, not a wrong entry in the reference file. The
 entries themselves are pinned by ``tests/test_classifier.py``, which names the
-paths each rule was written for and still passes unchanged, and by the fourth
-layer, whose expected output was produced by the released classifier and not by
-anything in this checkout.
+paths each rule was written for, and by the fourth layer, whose stored output
+changes only when someone regenerates and reviews it. The comment above the
+fourth layer says where that output came from.
 """
 
 from __future__ import annotations
@@ -174,9 +174,8 @@ def reference() -> assurance.Rules:
     return assurance.load_rules(assurance.REFERENCE_RULES_PATH)
 
 
-@pytest.fixture(scope="module")
-def probes(reference) -> list[str]:
-    """Paths built from the reference file's own entries and their near misses.
+def probe_paths(rules: assurance.Rules) -> list[str]:
+    """Paths built from a rule set's own entries and their near misses.
 
     Each exact entry is probed as written and off by a suffix, a parent, a case,
     a missing character, a ``./`` and a trailing slash. Each prefix, including
@@ -185,9 +184,9 @@ def probes(reference) -> list[str]:
     """
 
     probes = {"README.md", "notes.txt", "src/app.py", "docs/guide.md", "x/y/z.py", "a.md"}
-    prefixes = set(reference.doc_only_prefixes)
-    suffixes = set(reference.doc_only_suffixes)
-    for rule in reference.path_rules:
+    prefixes = set(rules.doc_only_prefixes)
+    suffixes = set(rules.doc_only_suffixes)
+    for rule in rules.path_rules:
         for exact in rule.exact:
             probes |= {
                 exact, exact + ".bak", "x/" + exact, exact.upper(), exact[:-1], "./" + exact, exact + "/",
@@ -202,6 +201,12 @@ def probes(reference) -> list[str]:
         }
         probes |= {prefix + "f" + suffix for suffix in suffixes}
     return sorted(probes)
+
+
+@pytest.fixture(scope="module")
+def probes(reference) -> list[str]:
+    """The sweep of the reference file: :func:`probe_paths` of its rules."""
+    return probe_paths(reference)
 
 
 @pytest.fixture(scope="module")
@@ -267,7 +272,7 @@ def test_the_entry_point_prints_the_same_rows_with_the_reference_file(probes):
 
 
 def _run_script(tmp_path, stdin, *argv):
-    """The script as ``ci-profile`` runs it: isolated, from another directory."""
+    """The script as a CI entrypoint runs it: isolated, from another directory."""
     return subprocess.run(
         [sys.executable, "-I", str(SCRIPT), *argv], input=stdin, cwd=tmp_path,
         capture_output=True, text=True, check=False,
@@ -285,45 +290,54 @@ def test_the_script_prints_the_same_rows_with_the_reference_file(tmp_path, probe
     assert printed == {rule.rule_id for rule in reference.path_rules}
 
 
-# The released classifier.
+# The recorded output.
 #
-# The files under tests/fixtures/ were not produced by this code. They are what the
-# classifier reported before its rules became data: scripts/assurance.py at
-# 54facfab602c8e25569187e04c03db37eff400aa, the same file as in the v0.0.1, v0.0.2
-# and v0.1.0 releases.
+# The files under tests/fixtures/ are not recomputed by these tests. They are the
+# classifier's output for the sweep, recorded and reviewed:
 #
 #   classifier-golden-paths.txt   the changed paths, one per line: the sweep's probes
-#                                 (the reference file's entries and their near misses)
-#                                 and a few ordinary names
-#   classifier-golden-rows.txt    the released command line's output for those paths,
-#                                 as printed
+#                                 (the reference file's entries, their near misses
+#                                 and a few ordinary names), exactly
+#   classifier-golden-rows.txt    the command line's output for those paths, as printed
 #   classifier-golden-routes.txt  each path, then its route as a C1, a C2 and a C3
 #                                 change, tab-separated
 #
-# To regenerate them, take the released script from the history, never from this
-# checkout. $TMP is any directory outside the repository; run from the repository root:
+# In v0.4.0 and every release before it, the reference file held the layout of the
+# repository the classifier was extracted from, and these files were the output of the
+# released classifier: scripts/assurance.py at 54facfab602c8e25569187e04c03db37eff400aa,
+# the file of the v0.0.1, v0.0.2 and v0.1.0 releases, with the rules in the code. The
+# reference file then became an example layout by a one-to-one rename of its path
+# segments and of two rule ids, and the stored output was carried over by the same
+# rename: the released classifier, run on the paths renamed back, printed these rows and
+# routes; renamed forward, they equal the stored files. The rename is not kept in this
+# repository, so the files are no longer regenerated from the release. They are the
+# recorded output of this checkout.
 #
-#   git show 54facfab602c8e25569187e04c03db37eff400aa:scripts/assurance.py > "$TMP/assurance.py"
-#   python3 -I "$TMP/assurance.py" < tests/fixtures/classifier-golden-paths.txt \
+# To regenerate them, run from the repository root with the development
+# requirements installed:
+#
+#   python3 -c 'from scripts import assurance; from tests.test_classifier_parity import probe_paths; print(*probe_paths(assurance.load_rules(assurance.REFERENCE_RULES_PATH)), sep="\n")' \
+#       > tests/fixtures/classifier-golden-paths.txt
+#   python3 -I scripts/assurance.py < tests/fixtures/classifier-golden-paths.txt \
 #       > tests/fixtures/classifier-golden-rows.txt
 #
-# The released command line prints no route, so the routes file comes from a short
-# script that takes "$TMP/assurance.py" as its argument. Redirect its output to
+# The command line prints no route, so the routes file comes from a short script that
+# takes scripts/assurance.py as its argument. Redirect its output to
 # tests/fixtures/classifier-golden-routes.txt:
 #
 #   import importlib.util, sys
-#   spec = importlib.util.spec_from_file_location("released", sys.argv[1])
-#   released = importlib.util.module_from_spec(spec)
-#   sys.modules["released"] = released  # its dataclasses look the module up by name
-#   spec.loader.exec_module(released)
+#   spec = importlib.util.spec_from_file_location("classifier", sys.argv[1])
+#   classifier = importlib.util.module_from_spec(spec)
+#   sys.modules["classifier"] = classifier  # its dataclasses look the module up by name
+#   spec.loader.exec_module(classifier)
 #   with open("tests/fixtures/classifier-golden-paths.txt", encoding="utf-8") as handle:
 #       for path in handle.read().split():
-#           routes = (released.assurance_route_for(c, frozenset({path})) for c in ("C1", "C2", "C3"))
+#           routes = (classifier.assurance_route_for(c, frozenset({path})) for c in ("C1", "C2", "C3"))
 #           print(path, *routes, sep="\t")
 #
-# Adding paths means regenerating both outputs. A line that changes for a path that was
-# already there means the reference policy now differs from the release: that is a
-# decision to review, not an update to accept.
+# Regenerate all three when the reference file changes. A line that changes for a path
+# that was already there means the reference policy now classifies that path
+# differently: that is a decision to review, not an update to accept.
 
 GOLDEN = ROOT / "tests" / "fixtures"
 GOLDEN_PATHS = GOLDEN / "classifier-golden-paths.txt"
@@ -355,10 +369,15 @@ def test_the_golden_files_reach_every_reference_rule_and_every_route(reference):
     assert routes == {"review", "tests_and_review", "tests"}
 
 
+def test_the_golden_paths_are_the_sweep_of_the_reference_file(probes):
+    """The stored paths are the sweep itself, so an entry the file gains is recorded too."""
+    assert GOLDEN_PATHS.read_text(encoding="utf-8").splitlines() == probes
+
+
 @pytest.mark.parametrize(
     "argv", [(), ("--rules", str(assurance.REFERENCE_RULES_PATH))], ids=DEFAULT_OR_SUPPLIED
 )
-def test_the_script_prints_the_rows_the_released_classifier_printed(tmp_path, argv):
+def test_the_script_prints_the_recorded_rows(tmp_path, argv):
     # Bytes in and bytes out, so that no newline translation can hide a difference.
     done = subprocess.run(
         [sys.executable, "-I", str(SCRIPT), *argv], input=GOLDEN_PATHS.read_bytes(), cwd=tmp_path,
@@ -370,7 +389,7 @@ def test_the_script_prints_the_rows_the_released_classifier_printed(tmp_path, ar
 
 
 @pytest.mark.parametrize("supplied", [False, True], ids=DEFAULT_OR_SUPPLIED)
-def test_the_routes_are_the_ones_the_released_classifier_returned(reference, supplied):
+def test_the_routes_are_the_recorded_ones(reference, supplied):
     route_for = (
         functools.partial(assurance.assurance_route_for, rules=reference)
         if supplied
