@@ -8,7 +8,7 @@
   ],
   "files": {
     "merge_guard/__init__.py": {
-      "sha256": "db759645227498f83f38571b0bc8300819ae1055b1d695845e5f5d84fe5c2f22",
+      "sha256": "2f2985737bc00bc2afece581b2d7631516a9d6e996f3440acba476a1032cebf9",
       "bytes": 572
     },
     "merge_guard/cli.py": {
