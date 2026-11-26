@@ -36,8 +36,8 @@
       "bytes": 32148
     },
     "scripts/assurance.py": {
-      "sha256": "14e0d1a8a8a1bb4d7828a50796af4d54d59cc774f9812c15e35420067a041d8b",
-      "bytes": 31510
+      "sha256": "dfb8f967c5732ee96ba1aac3c25f684d5776cb689d8f24ebbb1ec7e44596547a",
+      "bytes": 31531
     },
     "scripts/merge_guard.py": {
       "sha256": "5e5369409b73c6f0a1fb55e5d3f29d92d3d11aa370bc16c32285edd102cc054a",

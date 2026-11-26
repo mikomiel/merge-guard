@@ -96,9 +96,9 @@ unchanged, and its path data was moved out of it into ``reference-rules.toml``
 without changing a result. The section labels in these docstrings are those of
 the specification it was written against, and a file or function these
 docstrings name that this repository does not hold belongs to the repository it
-was extracted from. In v0.4.0 and every release before it, the reference file
-held the layout of that repository, and a call without rules used it. The file is
-now an example layout that nothing reads unless a caller passes it, and a
+was extracted from. From v0.2.0 to v0.4.0 the reference file held the layout of
+that repository (earlier releases had it in the code), and a call without rules
+used it. The file is now an example layout that nothing reads unless a caller passes it, and a
 consumer that relied on that default supplies its own file.
 """
 

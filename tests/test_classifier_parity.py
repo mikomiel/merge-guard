@@ -314,9 +314,9 @@ def test_the_script_prints_the_rows_of_the_reference_file_and_refuses_without_it
 #   classifier-golden-routes.txt  each path, then its route as a C1, a C2 and a C3
 #                                 change, tab-separated
 #
-# In v0.4.0 and every release before it, the reference file held the layout of the
-# repository the classifier was extracted from, and these files were the output of the
-# released classifier: scripts/assurance.py at 54facfab602c8e25569187e04c03db37eff400aa,
+# Up to v0.4.0 the default rule set was the layout of the repository the classifier
+# was extracted from: in the code of the classifier up to v0.1.0, and in the reference
+# file from v0.2.0. These files were the output of the released classifier: scripts/assurance.py at 54facfab602c8e25569187e04c03db37eff400aa,
 # the file of the v0.0.1, v0.0.2 and v0.1.0 releases, with the rules in the code. The
 # reference file then became an example layout by a one-to-one rename of its path
 # segments and of two rule ids, and the stored output was carried over by the same

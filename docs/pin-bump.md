@@ -220,9 +220,11 @@ depends on how you called the classifier before the bump:
 
 If you called the classifier in either of the first two ways, take these steps:
 
-1. **Keep your rules.** Before the bump, copy the `scripts/reference-rules.toml`
-   that you vendored at v0.4.0 to a path outside the vendor root, so that a bump
-   cannot replace it. The copy keeps your classes and rule ids.
+1. **Keep your rules.** In a change of its own that merges before the bump, copy
+   the `scripts/reference-rules.toml` that you vendored at v0.4.0 to a path
+   outside the vendor root, so that a bump cannot replace it. The copy keeps your
+   classes and rule ids, and the bump finds it on the base branch, where step 3
+   reads it.
 2. **Pass that file.** After the bump, pass it with `--rules FILE` or `rules=` on
    every call. Do not pass the vendored `reference-rules.toml`: after the bump it
    is the example layout.
@@ -248,8 +250,12 @@ that ships it:
    file, with the same rule ids. `v0.4.0` carries the same bytes, so take the file
    from either tag. Do not take it from the release that you are bumping to: there
    it is the example layout.
-2. **Keep it outside the vendor root.** Copy it to a path outside the vendor
-   root, so that a bump cannot replace it.
+2. **Land it before the bump.** Copy it to a path outside the vendor root, so
+   that a bump cannot replace it, in a change of its own, and merge that change
+   before the bump. Step 3 reads the file from the base branch: a file that the
+   bump itself adds is not there yet, so the classifier cannot read it and
+   refuses, and reading the copy in the bump's own pull request instead would let
+   that change choose the policy that classifies it.
 3. **Pass it on every call.** Give each call `--rules FILE` or `rules=`. Read the
    file from the base branch and keep a C1 rule for its own path, as step 3 of the
    list above says.

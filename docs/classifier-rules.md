@@ -324,7 +324,8 @@ in it are empty.
 
 In v0.4.0 and every release before it, a call that supplied no rules was
 classified against the layout of the repository the classifier was extracted
-from, and `reference-rules.toml` held that layout. The first release after
+from. Up to v0.1.0 that layout was in the code of the classifier; from v0.2.0
+`reference-rules.toml` held it. The first release after
 v0.4.0 replaced that layout with this one, renamed two rule ids
 (`C1-ANSIBLE-RUNTIME` is now `C1-AUTOMATION-RUNTIME` and `C1-NETWORK-PVE` is now
 `C1-NETWORK-HYPERVISOR`) and made a rule set required. If your repository
