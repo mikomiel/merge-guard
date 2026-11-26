@@ -3,10 +3,12 @@
 # An example layout, not a policy to adopt: a synthetic monorepo with apps under
 # apps/, service code under services/, shared scripts and configuration under
 # shared/, a tool configuration under tools-config/ and host automation under
-# infra/. It runs when no rule file is supplied, and it shows the format at a
-# larger scale than examples/classifier-rules.toml. In v0.4.0 and every release
-# before it, this file held the layout of the repository the classifier was
-# extracted from. A repository that relied on that default supplies its own file
+# infra/. Nothing reads it unless a caller passes it (--rules FILE, or rules=):
+# the classifier has no rule set of its own and refuses a call that gives none.
+# It shows the format at a larger scale than examples/classifier-rules.toml. In
+# v0.4.0 and every release before it, a call that gave no rules was classified
+# against the layout of the repository the classifier was extracted from. A
+# repository that relied on that default supplies its own file
 # (docs/classifier-rules.md).
 #
 # How a rule set is read: every rule is tested against every changed path, one

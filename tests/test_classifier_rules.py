@@ -3,14 +3,17 @@ supplied file does.
 
 ``tests/test_classifier.py`` pins how the reference set classifies.
 This file pins the seam around it: every way a rule file is refused, that a
-supplied file replaces the reference set instead of extending it, that an
-unusable file never falls back to a weaker answer, and that the documentation
-and the worked example match the code. Every layout in here is synthetic.
+call without a rule set is refused, that a supplied file replaces another rule
+set instead of extending it, that an unusable file never falls back to a weaker
+answer, that importing the module needs no file, and that the documentation and
+the worked example match the code. Every layout in here is synthetic.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import inspect
+import json
 import re
 import shutil
 import subprocess
@@ -254,6 +257,10 @@ REFUSALS = [
 #: Refusals that come from reading the file, not from validating its table.
 FILE_REFUSALS = ("rules_unreadable", "rules_not_toml")
 
+#: Refusals that come from a call that names no rule set at all, not from a file. The
+#: tests under "A call without a rule set" are its failing cases.
+CALL_REFUSALS = ("rules_required",)
+
 
 def _refusal(data) -> str:
     with pytest.raises(assurance.RulesUnusable) as caught:
@@ -280,7 +287,7 @@ def test_the_smallest_usable_table_is_accepted():
 def test_every_published_reason_has_a_failing_case_and_a_document_row():
     """Each ``rules_*`` code is permanent, so none ships untested or undocumented."""
     in_code = set(re.findall(r'"(rules_[a-z_]+)', SCRIPT.read_text(encoding="utf-8")))
-    tested = {case[2] for case in REFUSALS} | set(FILE_REFUSALS)
+    tested = {case[2] for case in REFUSALS} | set(FILE_REFUSALS) | set(CALL_REFUSALS)
     assert in_code == tested
     document = DOCUMENT.read_text(encoding="utf-8")
     for reason in sorted(in_code):
@@ -522,10 +529,19 @@ def test_the_worked_example_is_not_the_reference_layout():
     )
 
 
-def test_a_copy_of_the_module_has_no_layout_of_its_own(tmp_path):
-    """Without its reference file the module refuses to load: it carries no rules.
+def _required_message() -> str:
+    """What a call without a rule set is refused with: the reason ``classify_change`` raises."""
+    with pytest.raises(assurance.RulesRequired) as caught:
+        assurance.classify_change(frozenset({"repos.yaml"}), [])
+    return str(caught.value)
 
-    Run as a script that is the stable refusal: exit 2, no rows, one line on stderr.
+
+def test_a_copy_of_the_module_has_no_layout_of_its_own(tmp_path):
+    """A copy of the module carries no rules: with no reference file beside it, and none
+    passed, it refuses.
+
+    Run as a script that is the stable refusal: exit 2, no rows, one line on stderr, the
+    one the function raises for a call without a rule set.
     """
     copy = tmp_path / "assurance.py"
     shutil.copy(SCRIPT, copy)
@@ -533,11 +549,48 @@ def test_a_copy_of_the_module_has_no_layout_of_its_own(tmp_path):
         [sys.executable, "-I", str(copy)], input="repos.yaml\n",
         capture_output=True, text=True, check=False,
     )
-    # The module resolves its own location, so the message names the resolved path.
-    missing = copy.resolve().with_name("reference-rules.toml")
     assert done.returncode == 2
     assert done.stdout == ""
-    assert done.stderr == f"merge_guard_refused: rules_unreadable: {missing}: FileNotFoundError\n"
+    assert done.stderr == f"merge_guard_refused: {_required_message()}\n"
+
+
+#: A fresh interpreter's program for a copy of the module in the directory ``sys.argv[1]``:
+#: import it, call it without rules, and report what happened and whether a reference file
+#: sits beside it.
+IMPORT_THEN_CALL_WITHOUT_RULES = """\
+import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import assurance
+
+try:
+    assurance.classify_change(frozenset({"repos.yaml"}), [])
+except assurance.RulesUnusable as exc:
+    outcome = {"raised": type(exc).__name__, "message": str(exc)}
+else:
+    outcome = {"raised": None, "message": None}
+outcome["reference_exists"] = assurance.REFERENCE_RULES_PATH.exists()
+print(json.dumps(outcome))
+"""
+
+
+def test_a_copy_of_the_module_alone_imports_and_still_refuses_without_rules(tmp_path):
+    """Importing the module reads no file. A fresh isolated interpreter imports a copy of
+    ``assurance.py`` that is alone in its directory, with no ``reference-rules.toml``
+    beside it, and the copy refuses a call without rules instead of classifying."""
+    shutil.copy(SCRIPT, tmp_path / "assurance.py")
+    assert [entry.name for entry in tmp_path.iterdir()] == ["assurance.py"]
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", IMPORT_THEN_CALL_WITHOUT_RULES, str(tmp_path.resolve())],
+        capture_output=True, text=True, check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout) == {
+        "raised": "RulesRequired",
+        "message": _required_message(),
+        "reference_exists": False,
+    }
 
 
 #: Ways the reference file beside a copy of the module can be unusable, as (label,
@@ -576,21 +629,17 @@ def _refusal_pattern(pattern: str, reference: Path) -> str:
 
 
 @pytest.mark.parametrize(
-    "argv",
-    [(), ("--rules", str(EXAMPLE)), ("--bogus",)],
-    ids=["no arguments", "a usable --rules file", "a malformed command line"],
-)
-@pytest.mark.parametrize(
     ("label", "how", "pattern"), BROKEN_REFERENCES, ids=[case[0] for case in BROKEN_REFERENCES]
 )
 def test_a_broken_reference_file_is_the_stable_refusal_not_a_traceback(
-    tmp_path, label, how, pattern, argv
+    tmp_path, label, how, pattern
 ):
-    """Exit 2, no rows, one refusal line. Whatever the arguments, even a usable
-    ``--rules`` file, they do not hide that the module's own rules are unusable."""
+    """Passed with ``--rules``, a reference file that cannot be used is the stable
+    refusal: exit 2, no rows, one refusal line, whatever is wrong with it."""
     copy, reference = _module_copy(tmp_path, how)
     done = subprocess.run(
-        [sys.executable, "-I", str(copy), *argv], input="repos.yaml\nsrc/auth/login.py\n",
+        [sys.executable, "-I", str(copy), "--rules", str(reference)],
+        input="repos.yaml\nsrc/auth/login.py\n",
         capture_output=True, text=True, check=False,
     )
     assert done.returncode == 2
@@ -601,35 +650,76 @@ def test_a_broken_reference_file_is_the_stable_refusal_not_a_traceback(
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [(), ("--rules", str(EXAMPLE)), ("--bogus",)],
+    ids=["no arguments", "a usable --rules file", "a malformed command line"],
+)
+@pytest.mark.parametrize(
     ("label", "how", "pattern"), BROKEN_REFERENCES, ids=[case[0] for case in BROKEN_REFERENCES]
 )
-def test_importing_a_copy_with_a_broken_reference_file_fails_closed(
+def test_a_broken_file_beside_the_module_is_never_read(tmp_path, label, how, pattern, argv):
+    """The module reads no file of its own, so what sits beside it changes nothing, however
+    broken: no arguments is the refusal for a missing rule set, a malformed command line is
+    the usage line, and a usable ``--rules`` file classifies."""
+    copy, _ = _module_copy(tmp_path, how)
+    done = subprocess.run(
+        [sys.executable, "-I", str(copy), *argv], input="repos.yaml\nsrc/auth/login.py\n",
+        capture_output=True, text=True, check=False,
+    )
+    if argv == ():
+        expected = (2, "", f"merge_guard_refused: {_required_message()}\n")
+    elif argv == ("--bogus",):
+        expected = (2, "", "usage: assurance.py --rules FILE < changed-paths\n")
+    else:
+        expected = (0, "AUTH\tsrc/auth/login.py\n", "")
+    assert (done.returncode, done.stdout, done.stderr) == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "how", "pattern"), BROKEN_REFERENCES, ids=[case[0] for case in BROKEN_REFERENCES]
+)
+def test_a_copy_with_a_broken_reference_file_imports_and_passing_it_fails_closed(
     tmp_path, monkeypatch, label, how, pattern
 ):
-    """In process nothing falls back: the import itself raises, with the same reason."""
+    """Nothing reads the file beside the copy, so the import succeeds. A caller that passes
+    it anyway gets the refusal for what is wrong with it, with the same reason as ever:
+    in process nothing falls back."""
     copy, reference = _module_copy(tmp_path, how)
     name = "assurance_copy"
     spec = importlib.util.spec_from_file_location(name, copy)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, name, module)  # dataclasses look a module up by name
+    spec.loader.exec_module(module)
+    assert module.REFERENCE_RULES_PATH == reference
     with pytest.raises(ValueError) as caught:
-        spec.loader.exec_module(module)
+        module.load_rules(module.REFERENCE_RULES_PATH)
     # The copy defines its own RulesUnusable, so the class cannot be named from here.
     assert type(caught.value).__name__ == "RulesUnusable"
     assert re.fullmatch(_refusal_pattern(pattern, reference), str(caught.value)), str(caught.value)
 
 
-def test_the_file_beside_the_module_is_the_policy(tmp_path):
-    """Swap the reference file and the same module classifies another layout."""
+def test_the_file_beside_the_module_is_not_the_policy_until_it_is_passed(tmp_path):
+    """A usable reference file beside the module is not picked up: the same copy refuses
+    without ``--rules``, and classifies another layout when the file is passed."""
     copy = tmp_path / "assurance.py"
     shutil.copy(SCRIPT, copy)
-    shutil.copy(EXAMPLE, tmp_path / "reference-rules.toml")
-    done = subprocess.run(
-        [sys.executable, "-I", str(copy)], input="repos.yaml\nsrc/auth/login.py\n",
-        capture_output=True, text=True, check=False,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stdout == "AUTH\tsrc/auth/login.py\n"
+    beside = tmp_path / "reference-rules.toml"
+    shutil.copy(EXAMPLE, beside)
+    stdin = "repos.yaml\nsrc/auth/login.py\n"
+
+    def run(*argv):
+        return subprocess.run(
+            [sys.executable, "-I", str(copy), *argv], input=stdin,
+            capture_output=True, text=True, check=False,
+        )
+
+    refused = run()
+    assert refused.returncode == 2
+    assert refused.stdout == ""
+    assert refused.stderr == f"merge_guard_refused: {_required_message()}\n"
+    passed = run("--rules", str(beside))
+    assert passed.returncode == 0, passed.stderr
+    assert passed.stdout == "AUTH\tsrc/auth/login.py\n"
 
 
 # A supplied file.
@@ -639,16 +729,22 @@ def example() -> assurance.Rules:
     return assurance.load_rules(EXAMPLE)
 
 
+@pytest.fixture(scope="module")
+def reference() -> assurance.Rules:
+    """The shipped example layout, passed explicitly: the classifier has no default."""
+    return assurance.load_rules(assurance.REFERENCE_RULES_PATH)
+
+
 def _classify(paths, rules, raw=()):
     return assurance.classify_change(frozenset(paths), list(raw), rules=rules)
 
 
-def test_a_supplied_file_replaces_the_reference_set(example):
-    assert _classify({"repos.yaml"}, None).gate_class == "C1"
+def test_a_supplied_file_replaces_the_reference_set(example, reference):
+    assert _classify({"repos.yaml"}, reference).gate_class == "C1"
     assert _classify({"repos.yaml"}, example) == assurance.ClassificationResult(
         "C2", ("DEFAULT-C2",)
     )
-    assert _classify({"src/auth/login.py"}, None).gate_class == "C2"
+    assert _classify({"src/auth/login.py"}, reference).gate_class == "C2"
     assert _classify({"src/auth/login.py"}, example) == assurance.ClassificationResult(
         "C1", ("AUTH",)
     )
@@ -724,22 +820,22 @@ def test_rows_follow_the_supplied_rules(example):
     ]
 
 
-def test_the_documentation_lists_come_from_the_supplied_file(example):
+def test_the_documentation_lists_come_from_the_supplied_file(example, reference):
     def route(*paths, rules):
         return assurance.assurance_route_for("C2", frozenset(paths), rules=rules)
 
-    assert route("notes.rst", rules=None) == "tests_and_review"
+    assert route("notes.rst", rules=reference) == "tests_and_review"
     assert route("notes.rst", rules=example) == "review"
     assert route("docs/a.py", rules=example) == "review"
     assert route("docs/a.py", "src/app.py", rules=example) == "tests_and_review"
-    assert route("docs/a.py", rules=None) == "tests_and_review"
+    assert route("docs/a.py", rules=reference) == "tests_and_review"
     assert assurance.assurance_route_for("C1", frozenset({"docs/a.py"}), rules=example) == (
         "tests_and_review"
     )
     assert assurance.assurance_route_for("C3", frozenset({"docs/a.py"}), rules=example) == "tests"
 
 
-def test_a_supplied_model_definition_allowlist_enables_c3_for_that_set_only():
+def test_a_supplied_model_definition_allowlist_enables_c3_for_that_set_only(reference):
     data = _with(model_definition={"files": ["m/model.yaml"], "fields": ["model", "provider"]})
     rules = assurance.validate_rules(data)
     paths = frozenset({"m/model.yaml"})
@@ -751,7 +847,7 @@ def test_a_supplied_model_definition_allowlist_enables_c3_for_that_set_only():
         "C3", ("C3-MODEL-DEFINITION-ONLY",)
     )
     assert classify(frozenset({"model", "tools"}), rules=rules).gate_class == "C2"
-    assert classify(frozenset({"model"}), rules=None).gate_class == "C2"
+    assert classify(frozenset({"model"}), rules=reference).gate_class == "C2"
     assert assurance.classify_change(paths, [], rules=rules).gate_class == "C2"
     escalated = assurance.validate_rules(_with(
         rule=[{"id": "ONE", "class": "C1", "exact": ["m/model.yaml"]}],
@@ -818,11 +914,15 @@ def test_empty_input_checks_a_file_without_classifying_anything(capsys, tmp_path
 def test_the_entry_point_rejects_a_malformed_command_line(capsys, argv):
     status, rows, errors = _main(capsys, ["repos.yaml\n"], argv)
     assert (status, rows) == (2, [])
-    assert errors == ["usage: assurance.py [--rules FILE] < changed-paths"]
+    assert errors == ["usage: assurance.py --rules FILE < changed-paths"]
 
 
-def test_without_arguments_the_entry_point_uses_the_reference_set(capsys):
-    status, rows, errors = _main(capsys, ["repos.yaml\n", "src/auth/login.py\n"], [])
+def test_the_entry_point_reads_the_reference_set_when_it_is_passed(capsys):
+    status, rows, errors = _main(
+        capsys,
+        ["repos.yaml\n", "src/auth/login.py\n"],
+        ["--rules", str(assurance.REFERENCE_RULES_PATH)],
+    )
     assert (status, errors) == (0, [])
     assert rows == ["C1-REPOSITORY-AUTHORITY\trepos.yaml"]
 
@@ -835,8 +935,13 @@ def _run_script(tmp_path, stdin, *argv):
     )
 
 
-def test_the_script_finds_its_reference_file_from_another_directory(tmp_path):
-    done = _run_script(tmp_path, "repos.yaml\nREADME.md\n")
+def test_the_script_runs_the_reference_file_passed_from_another_directory(tmp_path):
+    """The example's path is computed from the module, not from the working directory, so
+    it names the same file wherever the script runs."""
+    assert assurance.REFERENCE_RULES_PATH == SCRIPT.with_name("reference-rules.toml")
+    done = _run_script(
+        tmp_path, "repos.yaml\nREADME.md\n", "--rules", str(assurance.REFERENCE_RULES_PATH)
+    )
     assert done.returncode == 0, done.stderr
     assert done.stdout == "C1-REPOSITORY-AUTHORITY\trepos.yaml\n"
 
@@ -941,6 +1046,91 @@ def test_a_path_cannot_forge_a_refusal_line(
     assert done.stdout == ""
     assert len(done.stderr.splitlines()) == 1, done.stderr
     assert done.stderr == f"merge_guard_refused: {reason}: {str(path)!a}: {tail}\n"
+
+
+# A call without a rule set.
+
+#: Every public function that takes ``rules=``, as (label, a call that forwards the keyword
+#: arguments it is given). There is one entry for each input shape that a careless early
+#: return could answer without a rule set: a change whose paths could not be computed, and
+#: each class of route, since the route of a C1 or C3 change reads no rule list.
+ENTRY_POINTS = [
+    ("classify_change", lambda **rules: assurance.classify_change(
+        frozenset({"repos.yaml"}), [], **rules)),
+    ("classify_change, paths not computed", lambda **rules: assurance.classify_change(
+        None, [], **rules)),
+    ("c1_path_rules_by_path", lambda **rules: assurance.c1_path_rules_by_path(
+        ["repos.yaml"], **rules)),
+    ("assurance_route_for C1", lambda **rules: assurance.assurance_route_for(
+        "C1", frozenset({"repos.yaml"}), **rules)),
+    ("assurance_route_for C2", lambda **rules: assurance.assurance_route_for(
+        "C2", frozenset({"notes.md"}), **rules)),
+    ("assurance_route_for C3", lambda **rules: assurance.assurance_route_for(
+        "C3", frozenset({"notes.md"}), **rules)),
+    ("assurance_route_for, paths not computed", lambda **rules: assurance.assurance_route_for(
+        "C2", None, **rules)),
+]
+
+
+def test_classify_change_without_rules_raises_rules_required():
+    """The classifier has no rule set of its own: a call that names none is refused, never
+    classified against a default. The refusal is a ``RulesUnusable``, so a caller that
+    refuses an unusable file refuses this too, and its message says how to pass a rule set."""
+    with pytest.raises(assurance.RulesRequired) as caught:
+        assurance.classify_change(frozenset({"repos.yaml"}), [])
+    assert isinstance(caught.value, assurance.RulesUnusable)
+    message = str(caught.value)
+    assert message.partition(":")[0] == "rules_required", message
+    for fragment in (
+        "a rule set is required", "--rules FILE", "rules=load_rules(path)", "REFERENCE_RULES_PATH"
+    ):
+        assert fragment in message, message
+    assert len(message.splitlines()) == 1, message
+
+
+@pytest.mark.parametrize(("label", "call"), ENTRY_POINTS, ids=[case[0] for case in ENTRY_POINTS])
+@pytest.mark.parametrize("keywords", [{}, {"rules": None}], ids=["rules omitted", "rules=None"])
+def test_every_entry_point_refuses_a_call_without_rules(label, call, keywords, reference):
+    with pytest.raises(assurance.RulesRequired) as caught:
+        call(**keywords)
+    assert str(caught.value) == _required_message()
+    # The refusal is about the rule set alone: the same call answers when one is passed.
+    call(rules=reference)
+
+
+def test_every_public_function_that_takes_rules_is_refused_above():
+    """A function added with ``rules=None`` and a quiet fallback would be the implicit
+    default again, so a public function that takes ``rules`` has to be named here and in
+    ``ENTRY_POINTS``. ``rules`` stays passable by keyword, and omitting it is ``None``."""
+    taking_rules = {
+        name
+        for name, member in vars(assurance).items()
+        if not name.startswith("_")
+        and inspect.isfunction(member)
+        and member.__module__ == assurance.__name__
+        and "rules" in inspect.signature(member).parameters
+    }
+    assert taking_rules == {"classify_change", "c1_path_rules_by_path", "assurance_route_for"}
+    for name in sorted(taking_rules):
+        parameter = inspect.signature(getattr(assurance, name)).parameters["rules"]
+        assert parameter.default is None, name
+        assert parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ), name
+
+
+def test_the_entry_point_without_rules_refuses_and_prints_no_rows(capsys):
+    status, rows, errors = _main(capsys, ["repos.yaml\n", "src/auth/login.py\n"], [])
+    assert (status, rows) == (2, [])
+    assert errors == [f"merge_guard_refused: {_required_message()}"]
+
+
+def test_the_script_without_rules_refuses_and_prints_no_rows(tmp_path):
+    done = _run_script(tmp_path, "repos.yaml\nREADME.md\n")
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr == f"merge_guard_refused: {_required_message()}\n"
+    assert "Traceback" not in done.stderr
 
 
 # The documentation.

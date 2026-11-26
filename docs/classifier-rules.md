@@ -8,19 +8,24 @@ paths count as documentation, and which files `C3` may narrow. It lives in a
 TOML rule file that the classifier validates before it uses it, so a repository
 changes its policy by supplying a file, not by editing code.
 
-With no file supplied the classifier uses the reference rule set,
-`scripts/reference-rules.toml`. It is an example layout, not a recommended
-default: a synthetic monorepo, described under [The reference set](#the-reference-set).
-In v0.4.0 and every release before it, the reference set was the layout of the
-repository the classifier was extracted from. If your repository relied on that
-default, supply your own file. Nothing fails if you skip this: the script exits 0
-and prints fewer rows, and a path that your old rule file put in C1 takes the C2
-default. [docs/pin-bump.md](pin-bump.md#bumping) has the steps, and the
+A rule set is required. The classifier has none of its own, so a call that
+supplies none is refused: the script prints `merge_guard_refused: rules_required:
+...` and exits 2, and the functions raise `RulesRequired`. See
+[Supplying a rule file](#supplying-a-rule-file).
+
+`scripts/reference-rules.toml` ships as an example layout to pass explicitly, as
+`--rules scripts/reference-rules.toml` or `load_rules(REFERENCE_RULES_PATH)`. It
+is not a recommended policy, and nothing reads it unless you pass it: a synthetic
+monorepo, described under [The reference set](#the-reference-set). In v0.4.0 and
+every release before it, a call that supplied no rules was classified against the
+layout of the repository the classifier was extracted from. If your repository
+relied on that, supply your own file: the call that gave none is now the refusal.
+[docs/pin-bump.md](pin-bump.md#bumping) has the steps, and the
 [worked example](#a-worked-example) below is a smaller place to start.
-`tests/test_classifier_parity.py` pins that supplying the reference file
-explicitly reports the same rows as supplying nothing, and that both reproduce,
-byte for byte, the output recorded for it
-(`tests/fixtures/classifier-golden-rows.txt`).
+`tests/test_classifier_parity.py` pins that the reference file, passed
+explicitly, reproduces byte for byte the output recorded for it
+(`tests/fixtures/classifier-golden-rows.txt`), and that a call without rules is
+refused.
 
 ## What a rule file decides
 
@@ -40,8 +45,9 @@ record in the diff. The check profile each class selects is also fixed.
 
 A rule can only select `C1`, and every rule that matches is applied, so a rule
 file can add paths to the strongest class but cannot lower the class that
-another rule gave. A file that cannot be used is refused. It never classifies as
-a weaker class, and it never falls back to the reference set.
+another rule gave. A file that cannot be used is refused, and so is a call that
+supplies none. Neither classifies as a weaker class, and neither falls back to
+the reference set.
 
 ## Supplying a rule file
 
@@ -52,9 +58,11 @@ python3 -I scripts/assurance.py --rules FILE < changed-paths
 ```
 
 The script reads one changed path per line from stdin and prints one row for
-each rule that each path matches: the rule id, a tab and the path. Without
-`--rules` it uses the reference set. `--rules FILE` is the only argument it
-accepts; anything else prints a usage line and exits 2.
+each rule that each path matches: the rule id, a tab and the path. `--rules FILE`
+is required, and it is the only argument the script accepts. Without it the
+script prints the refusal below, prints no rows and exits 2. Any other argument
+prints the usage line `usage: assurance.py --rules FILE < changed-paths` and
+exits 2.
 
 A file that cannot be used prints `merge_guard_refused: <reason>` on stderr,
 prints no rows and exits 2, like the other refusals of this project
@@ -62,9 +70,20 @@ prints no rows and exits 2, like the other refusals of this project
 when the exit status is 0. To check a file without classifying anything, run it
 with empty input: exit status 0 means the file is usable.
 
-The script's own `reference-rules.toml` is refused the same way. If it is missing
-or unusable, the script prints the refusal before it reads any argument, so a
-usable `--rules FILE` does not hide it.
+A call that gives no file is refused the same way, with the reason
+`rules_required`. A caller that used to run the script without `--rules` sees
+this now, where it used to get rows classified against a built-in layout:
+
+```
+$ printf 'Dockerfile\n' | python3 -I scripts/assurance.py
+merge_guard_refused: rules_required: a rule set is required; pass --rules FILE, or rules=load_rules(path) in process; the example layout is REFERENCE_RULES_PATH
+$ echo $?
+2
+```
+
+The script's own `reference-rules.toml` is an ordinary rule file. Pass it with
+`--rules scripts/reference-rules.toml` to classify against the example layout;
+nothing else reads it.
 
 In process:
 
@@ -77,22 +96,27 @@ result = assurance.classify_change(paths, [], rules=rules)
 route = assurance.assurance_route_for(result.gate_class, paths, rules=rules)
 ```
 
-`classify_change`, `c1_path_rules_by_path` and `assurance_route_for` take an
-optional `rules=`; `None`, the default, is the reference set. `load_rules` reads
-and parses a file; `validate_rules` checks a table that is already parsed. Both
-return the same validated `Rules` and raise `RulesUnusable` with a reason from
-the [refusal table](#refusal-reasons).
+`classify_change`, `c1_path_rules_by_path` and `assurance_route_for` take
+`rules=`. It keeps its name and its `None` default, and a call that omits it or
+passes `None` is refused: the function raises `RulesRequired`, a subclass of
+`RulesUnusable`, with the message above, which says how to pass a rule set. This
+holds for every class and for a change whose paths could not be computed, so
+`assurance_route_for("C1", paths)` is refused too, although the route of a `C1`
+change reads no rule. The other public functions (`stronger`, `effective_class`,
+`required_check_profile_for` and `independent_review_required_for`) read no rule
+set and take no `rules=`. `load_rules` reads and parses a file; `validate_rules`
+checks a table that is already parsed. Both return the same validated `Rules` and
+raise `RulesUnusable` with a reason from the [refusal table](#refusal-reasons).
 
 Read the rule file from the base branch, not from the change being classified. A
 file taken from the change lets that change delete the rule that would escalate
 it. The copy on the base branch is the one the change does not control.
 
-The module reads `reference-rules.toml` from its own directory when it is
-imported. Copy the two files together. If that file is missing or unusable,
-importing the module raises `RulesUnusable` rather than classify without rules,
-and nothing falls back to another rule set. Run as a script, the same failure is
-the refusal described above: `merge_guard_refused: <reason>` on stderr, no rows
-and exit status 2. It needs Python 3.11 or later for `tomllib`.
+Importing the module reads no file, so a copy of `scripts/assurance.py` works
+without `reference-rules.toml` beside it. `REFERENCE_RULES_PATH` names that
+example file next to the module, for a caller that wants it as
+`load_rules(REFERENCE_RULES_PATH)`; it is a path and is read only then. The
+module needs Python 3.11 or later for `tomllib`.
 
 ## The file format
 
@@ -192,6 +216,7 @@ renamed or reused.
 
 | Reason | Raised when |
 | --- | --- |
+| `rules_required` | A call gave no rule set: `rules=` was omitted or `None`, or the command line had no `--rules`. The classifier has none of its own. The function raises `RulesRequired`, a subclass of `RulesUnusable`. The detail is not a fault in a file: it says how to pass a rule set, `--rules FILE` or `rules=load_rules(path)`, and names `REFERENCE_RULES_PATH`, the example layout. |
 | `rules_unreadable` | The file cannot be read as UTF-8 text: it is missing, is a directory, is not text, or its path holds a NUL. The detail names the file and the error class. A path that holds a control character is written as `ascii(str(path))`, so the refusal stays one line. |
 | `rules_not_toml` | The file is not valid TOML. A repeated key is invalid TOML, and so is an integer with more digits than the interpreter converts (4300 by default). The detail names the file and carries the parser's message. A path that holds a control character is written as `ascii(str(path))`, as for `rules_unreadable`. |
 | `rules_wrong_type` | A value has the wrong type: `rule` is not an array of tables, a section is not a table, `id` is not a string, a field is not a list, or an entry is not a string. |
@@ -288,18 +313,23 @@ $ echo $?
 
 ## The reference set
 
-`scripts/reference-rules.toml` is the rule set that runs when no file is
-supplied. It is an example: the layout of a synthetic monorepo, with apps under
-`apps/`, service code under `services/`, shared scripts and configuration under
-`shared/`, a tool configuration under `tools-config/` and host automation under
-`infra/`. Read it as a larger example of the same format, not as a layout to
-adopt. The C3 allowlists in it are empty.
+`scripts/reference-rules.toml` is an example rule file, and the classifier does
+not use it unless a caller passes it: `--rules scripts/reference-rules.toml`, or
+`assurance.load_rules(assurance.REFERENCE_RULES_PATH)` in process. It is the
+layout of a synthetic monorepo, with apps under `apps/`, service code under
+`services/`, shared scripts and configuration under `shared/`, a tool
+configuration under `tools-config/` and host automation under `infra/`. Read it as
+a larger example of the same format, not as a layout to adopt. The C3 allowlists
+in it are empty.
 
-In v0.4.0 and every release before it, the reference set was the layout of the
-repository the classifier was extracted from. The release after it replaced that
-layout with this one and renamed two rule ids: `C1-ANSIBLE-RUNTIME` is now
-`C1-AUTOMATION-RUNTIME` and `C1-NETWORK-PVE` is now `C1-NETWORK-HYPERVISOR`. If
-your repository classified with the default, follow the steps in
-[docs/pin-bump.md](pin-bump.md#bumping). Nothing fails if you skip this: the
-script exits 0 and prints fewer rows, and a path that your old rule file put in
-C1 takes the C2 default.
+In v0.4.0 and every release before it, a call that supplied no rules was
+classified against the layout of the repository the classifier was extracted
+from, and `reference-rules.toml` held that layout. The first release after
+v0.4.0 replaced that layout with this one, renamed two rule ids
+(`C1-ANSIBLE-RUNTIME` is now `C1-AUTOMATION-RUNTIME` and `C1-NETWORK-PVE` is now
+`C1-NETWORK-HYPERVISOR`) and made a rule set required. If your repository
+classified with the default, follow the steps in
+[docs/pin-bump.md](pin-bump.md#bumping). A call that gave no rules is refused.
+Passing the vendored `reference-rules.toml` is not refused, and it is not your old
+layout: the script exits 0 and prints fewer rows, and a path that your old rule
+file put in C1 takes the C2 default.

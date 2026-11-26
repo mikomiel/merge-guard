@@ -1,28 +1,28 @@
-"""Supplying the reference rule file changes nothing the classifier reports, and the
-reference rule set reports the output recorded for it.
+"""The reference rule file, passed explicitly, reports the output recorded for it, and the
+classifier refuses to classify when no rule set is passed.
 
-``scripts/reference-rules.toml`` is an example layout, and the rule set the
-classifier uses when none is supplied. Supplying that file explicitly must report
-the same class, rule ids, rows and route as supplying nothing. Four layers pin it,
-each at a different distance from the caller:
+``scripts/reference-rules.toml`` is an example layout. The classifier has no rule set of
+its own and never reads that file unless a caller passes it, so every call below that
+classifies passes it, loaded with ``load_rules(REFERENCE_RULES_PATH)``, and every call
+that does not is refused. Four layers pin it, each at a different distance from the caller:
 
-* every call that ``tests/test_classifier.py`` makes, with that file unmodified,
-  is repeated with the file supplied and the two results are compared;
-* a generated sweep of paths, built from the file's own entries and their near
-  misses, is classified both ways in process;
-* ``scripts/assurance.py`` run the way a caller runs it, ``python3 -I`` from
-  another directory, prints the same rows both ways;
-* the recorded output for that sweep, stored under ``tests/fixtures/``, is
-  reproduced byte for byte, with the default rules and with the reference file
-  supplied, over a stored set of paths that reaches every reference rule and
-  every route.
+* every call that ``tests/test_classifier.py`` makes is made with that file, unmodified
+  apart from the C3 allowlists that some of those tests fill in;
+* a generated sweep of paths, built from the file's own entries and their near misses, is
+  refused by every entry point without rules, and with the file reaches every reference
+  rule and both C2 routes;
+* ``scripts/assurance.py`` run the way a caller runs it, ``python3 -I`` from another
+  directory, prints the rows that the function returns for the same paths when the file is
+  passed, and refuses without it;
+* the recorded output for that sweep, stored under ``tests/fixtures/``, is reproduced byte
+  for byte with the reference file passed, over a stored set of paths that reaches every
+  reference rule and every route.
 
-The first three compare two ways of running the same code, so they catch drift in
-how a supplied rule set is read, not a wrong entry in the reference file. The
-entries themselves are pinned by ``tests/test_classifier.py``, which names the
-paths each rule was written for, and by the fourth layer, whose stored output
-changes only when someone regenerates and reviews it. The comment above the
-fourth layer says where that output came from.
+The first three pin how a rule set reaches the classifier, not a wrong entry in the
+reference file. The entries themselves are pinned by ``tests/test_classifier.py``, which
+names the paths each rule was written for, and by the fourth layer, whose stored output
+changes only when someone regenerates and reviews it. The comment above the fourth layer
+says where that output came from.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ import itertools
 import subprocess
 import sys
 import unittest
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -47,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "assurance.py"
 CLASSIFIER_TESTS = ROOT / "tests" / "test_classifier.py"
 
-#: The entry points a caller uses that accept ``rules=``.
+#: The entry points a caller uses that accept ``rules=``; ``main`` takes it as ``--rules``.
 WRAPPED = ("classify_change", "assurance_route_for", "c1_path_rules_by_path", "main")
 
 # The real functions, taken before any test replaces them.
@@ -62,81 +61,63 @@ def _run_main(lines, argv):
     return status, out.getvalue(), err.getvalue()
 
 
-def _settled(values):
-    """Iterators are single-use, and a call made twice needs them as lists."""
-    return [list(value) if isinstance(value, Iterator) else value for value in values]
+def _refusal_line() -> str:
+    """What the command line prints when no rule set is passed: the reason the function raises."""
+    with pytest.raises(assurance.RulesRequired) as caught:
+        assurance.classify_change(frozenset(), [])
+    return f"merge_guard_refused: {caught.value}\n"
 
 
-class _Pairing:
-    """Make each default-rules call a pair: the call, then the same call with the
-    reference file supplied.
+def _rows(paths, reference) -> str:
+    """The rows the command line prints for *paths*, from the function it is built on."""
+    return "".join(
+        f"{rule}\t{path}\n" for rule, path in assurance.c1_path_rules_by_path(paths, rules=reference)
+    )
 
-    The default call's result goes back to the caller untouched, so the tests
-    being observed run exactly as they do on their own. A difference is
+
+class _Observer:
+    """Note the rule set behind each call that the classifier tests make, and pass the call on.
+
+    The call's result goes back to the caller untouched, so the tests being observed run
+    exactly as they do on their own. A call that does not use the reference file is
     recorded, never raised, so one cannot hide another.
     """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.reference = assurance.load_rules(assurance.REFERENCE_RULES_PATH)
         self.calls = dict.fromkeys(WRAPPED, 0)
-        self.mismatches: list[str] = []
+        self.strays: list[str] = []
         for name in WRAPPED:
             monkeypatch.setattr(assurance, name, getattr(self, name))
 
-    def _compare(self, name, arguments, default, supplied):
+    def _note(self, name, arguments, rules):
         self.calls[name] += 1
-        if default != supplied:
-            self.mismatches.append(f"{name}{arguments!r}: default={default!r} supplied={supplied!r}")
+        # tests/test_classifier.py fills in the C3 allowlists with dataclasses.replace: the
+        # only way it can exercise C3 while the reference allowlists are empty. The path
+        # rules and the documentation lists must still be the file's own.
+        unmodified = None if rules is None else replace(
+            rules, model_files=self.reference.model_files, model_fields=self.reference.model_fields
+        )
+        if unmodified != self.reference:
+            self.strays.append(f"{name}{arguments!r}: rules={rules!r}")
 
     def classify_change(self, *args, rules=None, **kwargs):
-        original = _ORIGINAL["classify_change"]
-        if rules is not None:
-            return original(*args, rules=rules, **kwargs)
-        args = _settled(args)
-        kwargs = dict(zip(kwargs, _settled(kwargs.values())))
-        default = original(*args, **kwargs)
-        # tests/test_classifier.py substitutes the C3 allowlists by assigning the
-        # module attributes: the only way it can exercise C3 while the reference
-        # allowlists are empty. A supplied file would carry those lists in its
-        # [model_definition] section, so overlay them. The path rules and the
-        # documentation lists still come from the file.
-        rules = replace(
-            self.reference,
-            model_files=assurance._APPROVED_MODEL_DEFINITION_FILES,
-            model_fields=assurance._APPROVED_MODEL_DEFINITION_FIELDS,
-        )
-        self._compare("classify_change", args, default, original(*args, rules=rules, **kwargs))
-        return default
+        self._note("classify_change", args, rules)
+        return _ORIGINAL["classify_change"](*args, rules=rules, **kwargs)
 
     def assurance_route_for(self, change_class, changed_paths, *, rules=None):
-        original = _ORIGINAL["assurance_route_for"]
-        if rules is not None:
-            return original(change_class, changed_paths, rules=rules)
-        default = original(change_class, changed_paths)
-        supplied = original(change_class, changed_paths, rules=self.reference)
-        self._compare("assurance_route_for", (change_class, changed_paths), default, supplied)
-        return default
+        self._note("assurance_route_for", (change_class, changed_paths), rules)
+        return _ORIGINAL["assurance_route_for"](change_class, changed_paths, rules=rules)
 
     def c1_path_rules_by_path(self, changed_paths, *, rules=None):
-        original = _ORIGINAL["c1_path_rules_by_path"]
-        paths = list(changed_paths)
-        if rules is not None:
-            return original(paths, rules=rules)
-        default = original(paths)
-        self._compare("c1_path_rules_by_path", (paths,), default, original(paths, rules=self.reference))
-        return default
+        self._note("c1_path_rules_by_path", (changed_paths,), rules)
+        return _ORIGINAL["c1_path_rules_by_path"](changed_paths, rules=rules)
 
     def main(self, stdin, argv=()):
-        lines = list(stdin)
-        if argv:
-            return _ORIGINAL["main"](lines, argv)
-        default = _run_main(lines, ())
-        supplied = _run_main(lines, ("--rules", str(assurance.REFERENCE_RULES_PATH)))
-        self._compare("main", (lines,), default, supplied)
-        status, out, err = default
-        sys.stdout.write(out)
-        sys.stderr.write(err)
-        return status
+        self.calls["main"] += 1
+        if tuple(argv) != ("--rules", str(assurance.REFERENCE_RULES_PATH)):
+            self.strays.append(f"main(argv={tuple(argv)!r})")
+        return _ORIGINAL["main"](stdin, argv)
 
 
 def _load_classifier_tests():
@@ -147,8 +128,8 @@ def _load_classifier_tests():
     return module
 
 
-def test_every_call_in_the_classifier_tests_reports_the_same_with_the_reference_file(monkeypatch):
-    pairing = _Pairing(monkeypatch)
+def test_every_call_in_the_classifier_tests_is_made_with_the_reference_file(monkeypatch):
+    observer = _Observer(monkeypatch)
     suite = unittest.defaultTestLoader.loadTestsFromModule(_load_classifier_tests())
     cases = suite.countTestCases()
     stream = io.StringIO()
@@ -156,10 +137,10 @@ def test_every_call_in_the_classifier_tests_reports_the_same_with_the_reference_
     assert outcome.wasSuccessful(), stream.getvalue()
     assert outcome.testsRun == cases
     assert cases > 0
-    assert pairing.mismatches == []
+    assert observer.strays == []
     # Every entry point was reached, so a refactor of the observed tests that
     # stops calling one cannot thin the proof unnoticed.
-    assert all(pairing.calls.values()), pairing.calls
+    assert all(observer.calls.values()), observer.calls
 
 
 # A generated sweep.
@@ -219,40 +200,64 @@ def path_sets(probes) -> list[frozenset[str]]:
     return sets
 
 
-def _snapshot(paths, **rules):
-    """Everything the classifier reports for one change, with or without ``rules=``."""
-    return (
-        assurance.classify_change(paths, [], **rules),
-        assurance.classify_change(paths, SYMLINK, **rules),
-        assurance.classify_change(paths, [], BINARY, **rules),
-        assurance.c1_path_rules_by_path(sorted(paths), **rules),
-        *(assurance.assurance_route_for(change_class, paths, **rules) for change_class in CLASSES),
-    )
-
-
-def test_a_generated_sweep_is_classified_the_same_with_the_reference_file(path_sets, reference):
-    different = [
-        sorted(paths) for paths in path_sets if _snapshot(paths) != _snapshot(paths, rules=reference)
+def _calls(paths, **rules):
+    """Every call that reports on one change, not yet made: each entry point, diff shape and class."""
+    return [
+        lambda: assurance.classify_change(paths, [], **rules),
+        lambda: assurance.classify_change(paths, SYMLINK, **rules),
+        lambda: assurance.classify_change(paths, [], BINARY, **rules),
+        lambda: assurance.c1_path_rules_by_path(sorted(paths), **rules),
+        *(
+            functools.partial(assurance.assurance_route_for, change_class, paths, **rules)
+            for change_class in CLASSES
+        ),
     ]
-    assert different == [], different[:3]
 
 
-def test_a_change_that_cannot_be_computed_is_classified_the_same(reference):
-    assert assurance.classify_change(None, []) == assurance.classify_change(None, [], rules=reference)
-    assert assurance.assurance_route_for("C2", None) == assurance.assurance_route_for(
-        "C2", None, rules=reference
+def _unrefused(paths, **rules) -> list[int]:
+    """The calls for *paths*, by position, that answer instead of refusing."""
+    answered = []
+    for index, call in enumerate(_calls(paths, **rules)):
+        try:
+            call()
+        except assurance.RulesRequired:
+            continue
+        answered.append(index)
+    return answered
+
+
+def test_a_generated_sweep_is_refused_without_rules(path_sets):
+    answered = {}
+    for paths in path_sets:
+        for rules in ({}, {"rules": None}):
+            done = _unrefused(paths, **rules)
+            if done:
+                answered[tuple(sorted(paths)), repr(rules)] = done
+    assert answered == {}, list(answered.items())[:3]
+
+
+def test_a_change_that_cannot_be_computed_is_refused_without_rules_too(reference):
+    """Its answer, C1, reads no path rule, so it is the one that an early return would give
+    without a rule set. It is refused like any other, and answered when one is passed."""
+    with pytest.raises(assurance.RulesRequired):
+        assurance.classify_change(None, [])
+    with pytest.raises(assurance.RulesRequired):
+        assurance.assurance_route_for("C2", None)
+    assert assurance.classify_change(None, [], rules=reference) == assurance.ClassificationResult(
+        "C1", ("C1-UNKNOWN-CONTRADICTORY",)
     )
+    assert assurance.assurance_route_for("C2", None, rules=reference) == "tests_and_review"
 
 
 def test_the_sweep_reaches_every_rule_and_both_c2_routes(path_sets, reference):
-    """The comparison above can only fail where the sweep can tell the rules apart."""
+    """The refusal above is only as good as the sweep: it has to tell the rules apart."""
     seen = {
         rule_id
         for paths in path_sets
-        for rule_id in assurance.classify_change(paths, []).matched_rule_ids
+        for rule_id in assurance.classify_change(paths, [], rules=reference).matched_rule_ids
     }
     assert seen == {rule.rule_id for rule in reference.path_rules} | {assurance.DEFAULT_C2}
-    assert {assurance.assurance_route_for("C2", paths) for paths in path_sets} == {
+    assert {assurance.assurance_route_for("C2", paths, rules=reference) for paths in path_sets} == {
         "review",
         "tests_and_review",
     }
@@ -260,14 +265,18 @@ def test_the_sweep_reaches_every_rule_and_both_c2_routes(path_sets, reference):
 
 # The entry point.
 
-def test_the_entry_point_prints_the_same_rows_with_the_reference_file(probes):
+def test_the_entry_point_prints_the_rows_of_the_reference_file_and_refuses_without_it(
+    probes, reference
+):
     supplied = ("--rules", str(assurance.REFERENCE_RULES_PATH))
+    refusal = _refusal_line()
     printed = 0
     for start in range(0, len(probes), 7):
-        lines = [path + "\n" for path in probes[start : start + 7]]
-        default = _run_main(lines, ())
-        assert default == _run_main(lines, supplied), lines
-        printed += len(default[1].splitlines())
+        chunk = probes[start : start + 7]
+        lines = [path + "\n" for path in chunk]
+        assert _run_main(lines, ()) == (2, "", refusal), lines
+        assert _run_main(lines, supplied) == (0, _rows(chunk, reference), ""), lines
+        printed += len(_rows(chunk, reference).splitlines())
     assert printed > 0
 
 
@@ -279,14 +288,17 @@ def _run_script(tmp_path, stdin, *argv):
     )
 
 
-def test_the_script_prints_the_same_rows_with_the_reference_file(tmp_path, probes, reference):
+def test_the_script_prints_the_rows_of_the_reference_file_and_refuses_without_it(
+    tmp_path, probes, reference
+):
     stdin = "".join(path + "\n" for path in probes)
-    default = _run_script(tmp_path, stdin)
+    refused = _run_script(tmp_path, stdin)
     supplied = _run_script(tmp_path, stdin, "--rules", str(assurance.REFERENCE_RULES_PATH))
-    assert default.returncode == supplied.returncode == 0, (default.stderr, supplied.stderr)
-    assert default.stderr == supplied.stderr == ""
-    assert default.stdout == supplied.stdout
-    printed = {row.partition("\t")[0] for row in default.stdout.splitlines()}
+    assert (refused.returncode, refused.stdout, refused.stderr) == (2, "", _refusal_line())
+    assert supplied.returncode == 0, supplied.stderr
+    assert supplied.stderr == ""
+    assert supplied.stdout == _rows(probes, reference)
+    printed = {row.partition("\t")[0] for row in supplied.stdout.splitlines()}
     assert printed == {rule.rule_id for rule in reference.path_rules}
 
 
@@ -318,21 +330,25 @@ def test_the_script_prints_the_same_rows_with_the_reference_file(tmp_path, probe
 #
 #   python3 -c 'from scripts import assurance; from tests.test_classifier_parity import probe_paths; print(*probe_paths(assurance.load_rules(assurance.REFERENCE_RULES_PATH)), sep="\n")' \
 #       > tests/fixtures/classifier-golden-paths.txt
-#   python3 -I scripts/assurance.py < tests/fixtures/classifier-golden-paths.txt \
-#       > tests/fixtures/classifier-golden-rows.txt
+#   python3 -I scripts/assurance.py --rules scripts/reference-rules.toml \
+#       < tests/fixtures/classifier-golden-paths.txt > tests/fixtures/classifier-golden-rows.txt
 #
 # The command line prints no route, so the routes file comes from a short script that
-# takes scripts/assurance.py as its argument. Redirect its output to
-# tests/fixtures/classifier-golden-routes.txt:
+# takes scripts/assurance.py and scripts/reference-rules.toml as its two arguments.
+# Redirect its output to tests/fixtures/classifier-golden-routes.txt:
 #
 #   import importlib.util, sys
 #   spec = importlib.util.spec_from_file_location("classifier", sys.argv[1])
 #   classifier = importlib.util.module_from_spec(spec)
 #   sys.modules["classifier"] = classifier  # its dataclasses look the module up by name
 #   spec.loader.exec_module(classifier)
+#   rules = classifier.load_rules(sys.argv[2])
 #   with open("tests/fixtures/classifier-golden-paths.txt", encoding="utf-8") as handle:
 #       for path in handle.read().split():
-#           routes = (classifier.assurance_route_for(c, frozenset({path})) for c in ("C1", "C2", "C3"))
+#           routes = (
+#               classifier.assurance_route_for(c, frozenset({path}), rules=rules)
+#               for c in ("C1", "C2", "C3")
+#           )
 #           print(path, *routes, sep="\t")
 #
 # Regenerate all three when the reference file changes. A line that changes for a path
@@ -344,8 +360,9 @@ GOLDEN_PATHS = GOLDEN / "classifier-golden-paths.txt"
 GOLDEN_ROWS = GOLDEN / "classifier-golden-rows.txt"
 GOLDEN_ROUTES = GOLDEN / "classifier-golden-routes.txt"
 
-#: The same two questions as above: with no rules supplied, and with the reference file.
-DEFAULT_OR_SUPPLIED = ["default rules", "reference file supplied"]
+#: The one case the recorded output is checked in: the reference file, passed explicitly.
+#: Without rules the classifier refuses, so there is no recorded output for "default rules".
+SUPPLIED = ["reference file supplied"]
 
 
 def _routes_text(paths, route_for) -> str:
@@ -374,9 +391,7 @@ def test_the_golden_paths_are_the_sweep_of_the_reference_file(probes):
     assert GOLDEN_PATHS.read_text(encoding="utf-8").splitlines() == probes
 
 
-@pytest.mark.parametrize(
-    "argv", [(), ("--rules", str(assurance.REFERENCE_RULES_PATH))], ids=DEFAULT_OR_SUPPLIED
-)
+@pytest.mark.parametrize("argv", [("--rules", str(assurance.REFERENCE_RULES_PATH))], ids=SUPPLIED)
 def test_the_script_prints_the_recorded_rows(tmp_path, argv):
     # Bytes in and bytes out, so that no newline translation can hide a difference.
     done = subprocess.run(
@@ -388,12 +403,8 @@ def test_the_script_prints_the_recorded_rows(tmp_path, argv):
     assert done.stdout == GOLDEN_ROWS.read_bytes()
 
 
-@pytest.mark.parametrize("supplied", [False, True], ids=DEFAULT_OR_SUPPLIED)
-def test_the_routes_are_the_recorded_ones(reference, supplied):
-    route_for = (
-        functools.partial(assurance.assurance_route_for, rules=reference)
-        if supplied
-        else assurance.assurance_route_for
-    )
+@pytest.mark.parametrize("rules_path", [assurance.REFERENCE_RULES_PATH], ids=SUPPLIED)
+def test_the_routes_are_the_recorded_ones(rules_path):
+    route_for = functools.partial(assurance.assurance_route_for, rules=assurance.load_rules(rules_path))
     paths = GOLDEN_PATHS.read_text(encoding="utf-8").splitlines()
     assert _routes_text(paths, route_for).encode("utf-8") == GOLDEN_ROUTES.read_bytes()
