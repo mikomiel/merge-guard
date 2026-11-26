@@ -71,12 +71,19 @@ command line also reads a Forgejo repository and reaches the same verdicts, but
 it does not write to Forgejo in this release. [docs/cli.md](docs/cli.md#forgejo)
 covers the setup and the limits.
 
-The classifier's rules are data. With none supplied it applies the reference
-rule set it ships with, `scripts/reference-rules.toml`; a repository with another
-layout supplies its own file, and `scripts/assurance.py --rules FILE` refuses a
-file it cannot use. [docs/classifier-rules.md](docs/classifier-rules.md) documents
-the format and every refusal reason, with a worked example in
-`examples/classifier-rules.toml`.
+The classifier's rules are data, and it has none of its own. A rule set is
+required: pass it as `scripts/assurance.py --rules FILE`, or in process as
+`rules=load_rules(path)`. A call that gives none is refused, not classified. The
+script prints `merge_guard_refused: rules_required: ...` on stderr, prints no
+rows and exits 2, and the functions raise `RulesRequired`. It also refuses a file
+it cannot use. `scripts/reference-rules.toml` ships as an example layout to pass
+explicitly, as `--rules scripts/reference-rules.toml`; nothing reads it unless you
+pass it. In v0.4.0 and every release before it, a call that gave no rules was
+classified against the layout of the repository the classifier was extracted
+from, so a caller that relied on that now sees the refusal and supplies its own
+file ([docs/pin-bump.md](docs/pin-bump.md#bumping) has the steps).
+[docs/classifier-rules.md](docs/classifier-rules.md) documents the format and
+every refusal reason, with a worked example in `examples/classifier-rules.toml`.
 
 ## Carried approvals
 

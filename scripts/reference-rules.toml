@@ -1,27 +1,31 @@
 # The reference rule set for scripts/assurance.py.
 #
-# This is the policy the classifier was extracted with: the path rules, the
-# documentation lists and the C3 allowlists of one estate, kept as they were so
-# the classification can still be diffed against the copy it replaced. It runs
-# when no rule file is supplied. It is not the only option: a consumer with
-# another layout supplies its own file (docs/classifier-rules.md). The rule ids
-# belong to that estate's policy.
+# An example layout, not a policy to adopt: a synthetic monorepo with apps under
+# apps/, service code under services/, shared scripts and configuration under
+# shared/, a tool configuration under tools-config/ and host automation under
+# infra/. Nothing reads it unless a caller passes it (--rules FILE, or rules=):
+# the classifier has no rule set of its own and refuses a call that gives none.
+# It shows the format at a larger scale than examples/classifier-rules.toml. In
+# v0.4.0 and every release before it, a call that gave no rules was classified
+# against the layout of the repository the classifier was extracted from. A
+# repository that relied on that default supplies its own file
+# (docs/classifier-rules.md).
 #
 # How a rule set is read: every rule is tested against every changed path, one
 # matching path is enough to make the change C1, and the result lists the id of
 # every rule that matched. The order of the rules in this file does not matter.
 
-# The gate itself, its package (which holds the classifier) and its MCP adapter
-# and registry: the code that decides what may merge.
+# The gate itself, its package (which holds the classifier) and its server and
+# the service registry: the code that decides what may merge.
 [[rule]]
 id = "C1-GATE-AUTHORITY"
 class = "C1"
 exact = [
-  "opencode-config/scripts/git_maintainer_gate.py",
-  "MCPs/servers/git_maintainer_gate_mcp.py",
-  "MCPs/registry.yaml",
+  "tools-config/scripts/gate_cli.py",
+  "services/servers/gate_server.py",
+  "services/registry.yaml",
 ]
-prefixes = ["platform/scripts/git_gate/", "opencode-config/scripts/git_gate/"]
+prefixes = ["shared/scripts/gate/", "tools-config/scripts/gate/"]
 
 # The repository authority file: which copy of a repository is authoritative,
 # where it is written, mirrored and deployed, and what review and CI apply to
@@ -48,12 +52,12 @@ prefixes = [".forgejo/workflows/"]
 # through, whether a missing tool fails a check or skips it, and whether a push
 # to main skips jobs that a pull request already ran.
 exact = [
-  "scripts/ci-profile",
-  "scripts/validation-env",
-  "scripts/validation_lease.py",
-  "scripts/node-install-fresh.sh",
-  "scripts/toolgate.py",
-  "scripts/ci_c1_reuse.py",
+  "scripts/run-checks",
+  "scripts/check-env",
+  "scripts/check_lease.py",
+  "scripts/refresh-deps.sh",
+  "scripts/tool_policy.py",
+  "scripts/job_reuse.py",
 ]
 
 # Secrets, credential routing and permission policy: where credentials come from
@@ -62,20 +66,20 @@ exact = [
 id = "C1-SECRETS-PERMISSIONS"
 class = "C1"
 exact = [
-  "platform/config/credential-routing.yaml",
-  "MCPs/servers/infisical_bootstrap.py",
+  "shared/config/secret-sources.yaml",
+  "services/servers/secrets_bootstrap.py",
   ".claude/settings.json",
-  "harnesses/claude/settings.json",
+  "apps/web/settings.json",
 ]
 
-# The MCP servers that directly administer the network and hypervisor layer:
+# The servers that directly administer the network and hypervisor layer:
 # firewall, ingress, egress, SSH trust, storage, backup and restore. The role
-# code for the same hosts is covered by C1-ANSIBLE-RUNTIME below.
+# code for the same hosts is covered by C1-AUTOMATION-RUNTIME below.
 [[rule]]
-id = "C1-NETWORK-PVE"
+id = "C1-NETWORK-HYPERVISOR"
 class = "C1"
-exact = ["MCPs/servers/proxmox_mcp.py"]
-prefixes = ["MCPs/servers/pve_"]
+exact = ["services/servers/hypervisor_server.py"]
+prefixes = ["services/servers/vm_"]
 
 # The deployment and activation surface outside the gate package: what ships a
 # change and what makes it take effect. Publication, review, merge and cleanup
@@ -84,31 +88,31 @@ prefixes = ["MCPs/servers/pve_"]
 id = "C1-DEPLOY-ACTIVATE"
 class = "C1"
 exact = [
-  "opencode-config/scripts/oc_deploy.py",
-  "platform/scripts/oc_deploy.py",
-  "opencode-config/scripts/deploy_opencode_config.py",
+  "tools-config/scripts/deploy.py",
+  "shared/scripts/deploy.py",
+  "tools-config/scripts/deploy_config.py",
 ]
 prefixes = [
-  "platform/scripts/deploy_chain/",
-  "opencode-config/scripts/deploy_chain/",
+  "shared/scripts/rollout/",
+  "tools-config/scripts/rollout/",
 ]
 
-# Host automation and the harness role inputs it deploys, which set the runtime
+# Host automation and the app role inputs it deploys, which set the runtime
 # configuration of the hosts. Exempt: the automation's own tests, and Markdown
 # documentation under any of these prefixes. The exemption is per path: one
 # non-exempt path still makes the whole change C1.
 [[rule]]
-id = "C1-ANSIBLE-RUNTIME"
+id = "C1-AUTOMATION-RUNTIME"
 class = "C1"
 prefixes = [
-  "ansible-homelab/",
-  "harnesses/pi/role/",
-  "harnesses/codex/role/",
-  "harnesses/claude/role/",
-  "harnesses/deepseek/role/",
-  "harnesses/vibe/role/",
+  "infra/",
+  "apps/mobile/role/",
+  "apps/api/role/",
+  "apps/web/role/",
+  "apps/worker/role/",
+  "apps/admin/role/",
 ]
-exempt_prefixes = ["ansible-homelab/tests/"]
+exempt_prefixes = ["infra/tests/"]
 exempt_suffixes = [".md"]
 
 # Documentation and policy text, where a broad test suite adds little confidence.
@@ -116,10 +120,10 @@ exempt_suffixes = [".md"]
 suffixes = [".md"]
 prefixes = [
   "docs/plans/",
-  "opencode-config/openspec/",
-  "platform/openspec/",
-  "MCPs/openspec/",
-  "ansible-homelab/openspec/",
+  "tools-config/openspec/",
+  "shared/openspec/",
+  "services/openspec/",
+  "infra/openspec/",
 ]
 
 # No model-definition file or field is approved for C3, so both lists are empty

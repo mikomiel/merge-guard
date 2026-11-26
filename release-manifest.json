@@ -36,16 +36,16 @@
       "bytes": 32148
     },
     "scripts/assurance.py": {
-      "sha256": "242f1698539750c951ae8450f2f2fb864021ad226d34c09db64e554ac9ed7f51",
-      "bytes": 30509
+      "sha256": "dfb8f967c5732ee96ba1aac3c25f684d5776cb689d8f24ebbb1ec7e44596547a",
+      "bytes": 31531
     },
     "scripts/merge_guard.py": {
       "sha256": "5e5369409b73c6f0a1fb55e5d3f29d92d3d11aa370bc16c32285edd102cc054a",
       "bytes": 581
     },
     "scripts/reference-rules.toml": {
-      "sha256": "368adf9b12881f0278cbb70cf0341854757db7521389878978c6f2db29d54866",
-      "bytes": 4833
+      "sha256": "8fcd397edeed86e6d822805edb316071c3ae11158e0a14c08b9374616e4ea87a",
+      "bytes": 5004
     }
   }
 }

@@ -27,7 +27,7 @@ The closure is the classifier plus the package:
 
 | Files | What they are |
 | --- | --- |
-| `scripts/assurance.py` and `scripts/reference-rules.toml` | The classifier, and the reference rules it reads from its own directory. |
+| `scripts/assurance.py` and `scripts/reference-rules.toml` | The classifier, and an example rule set. The classifier needs a rule set from its caller and reads the example only when a caller passes it. |
 | Every file under `merge_guard/` | The package: the engine, the forge port with its GitHub and Forgejo adapters, the policy and the command line. |
 | `scripts/merge_guard.py` | The launcher of the command line. It puts the directory above `scripts/` on the import path and calls `merge_guard.cli`. |
 
@@ -61,10 +61,11 @@ that runs the closure supplies its own interpreter: the closure carries none.
 **Layout.** A consumer mirrors repository paths under its vendor root. A file the
 manifest lists as `scripts/assurance.py` lands at
 `<vendor root>/scripts/assurance.py`, never at `<vendor root>/assurance.py`. Do
-not flatten the tree. `assurance.py` reads `reference-rules.toml` from its own
-directory, and `scripts/merge_guard.py` finds the package at `merge_guard/` beside
-`scripts/`. The launcher is the runnable form of the command line: with the vendor
-root `vendor/merge-guard`, it runs as
+not flatten the tree. `scripts/merge_guard.py` finds the package at `merge_guard/`
+beside `scripts/`. `assurance.py` reads no file of its own: it needs a rule set
+from its caller, as `--rules FILE` or `rules=`, and `reference-rules.toml` is an
+example of one. The launcher is the runnable form of the command line: with the
+vendor root `vendor/merge-guard`, it runs as
 `python3 vendor/merge-guard/scripts/merge_guard.py <mode>`. Do not run
 `merge_guard/cli.py` as a file: it uses relative imports and fails with
 `ImportError`. To call the command line in process, put the vendor root on
@@ -196,8 +197,74 @@ check keeps the copy itself mechanical.
 
 The first bump to a release whose manifest lists the package also fixes the
 classifier's place. A consumer that kept the classifier flat, at
-`<vendor root>/assurance.py`, moves it to `<vendor root>/scripts/assurance.py`
-with `reference-rules.toml` beside it, and changes its loader in the same bump.
+`<vendor root>/assurance.py`, moves it to `<vendor root>/scripts/assurance.py`,
+where the manifest lists it, and changes its loader in the same bump. The
+classifier needs no file beside it.
+
+The first bump past v0.4.0 removes the classifier's default. A call that gives
+no rules is refused. Its `reference-rules.toml` becomes an example layout, and
+two of its rule ids are renamed
+([docs/classifier-rules.md](classifier-rules.md#the-reference-set)). What you see
+depends on how you called the classifier before the bump:
+
+- **No rules.** You ran the script without `--rules`, or called a function with
+  `rules=None` or without `rules=`. Before the bump, the call classified against
+  the old layout. Now the script prints `merge_guard_refused: rules_required: ...`
+  on stderr, prints no rows and exits 2, and a function raises `RulesRequired`, a
+  subclass of `RulesUnusable`, which is a `ValueError`.
+- **The vendored file.** You passed `--rules` or `rules=` with the vendored
+  `reference-rules.toml`. Nothing is refused and nothing fails: the script exits 0
+  and prints fewer rows, and a path that your old rule file put in C1 takes the
+  C2 default, because the file is now the example layout.
+- **Your own file.** Nothing changes.
+
+If you called the classifier in either of the first two ways, take these steps:
+
+1. **Keep your rules.** In a change of its own that merges before the bump, copy
+   the `scripts/reference-rules.toml` that you vendored at v0.4.0 to a path
+   outside the vendor root, so that a bump cannot replace it. The copy keeps your
+   classes and rule ids, and the bump finds it on the base branch, where step 3
+   reads it.
+2. **Pass that file.** After the bump, pass it with `--rules FILE` or `rules=` on
+   every call. Do not pass the vendored `reference-rules.toml`: after the bump it
+   is the example layout.
+3. **Protect that file.** Read it from the base branch, as
+   [Supplying a rule file](classifier-rules.md#supplying-a-rule-file) says, and
+   keep a C1 rule for its own path, as
+   [A worked example](classifier-rules.md#a-worked-example) shows.
+4. **Check the result.** Classify one path that only your own C1 rules match, and
+   confirm that it is still C1 with the same rule id. Do not use a path like
+   `repos.yaml` for this: the example layout has a rule for it too, so the check
+   would pass even if you passed the wrong file.
+
+**From v0.1.0.** In v0.1.0 the rules were in the Python code of the classifier.
+There was no rule file, no `--rules` and no `rules=`, and the manifest lists
+`scripts/assurance.py` alone. If you bump straight from v0.1.0, you have no
+`reference-rules.toml` to copy aside, and every call that you make gives no
+rules, so each is refused until you pass a file. Take the file from a release
+that ships it:
+
+1. **Take the file from a verified tag.** Read the tag and its manifest as steps 1
+   and 2 of the procedure say. `v0.2.0` is the first release that ships
+   `scripts/reference-rules.toml`: it moved the rules out of the code into that
+   file, with the same rule ids. `v0.4.0` carries the same bytes, so take the file
+   from either tag. Do not take it from the release that you are bumping to: there
+   it is the example layout.
+2. **Land it before the bump.** Copy it to a path outside the vendor root, so
+   that a bump cannot replace it, in a change of its own, and merge that change
+   before the bump. Step 3 reads the file from the base branch: a file that the
+   bump itself adds is not there yet, so the classifier cannot read it and
+   refuses, and reading the copy in the bump's own pull request instead would let
+   that change choose the policy that classifies it.
+3. **Pass it on every call.** Give each call `--rules FILE` or `rules=`. Read the
+   file from the base branch and keep a C1 rule for its own path, as step 3 of the
+   list above says.
+4. **Check it against the classifier you now run.** Classify a path that only a
+   C1 rule of that file matches, with `--rules` naming the copy, and confirm that
+   it is C1 with the rule id you expect. Then run the same command without
+   `--rules` and confirm the refusal. Do not use a path like `repos.yaml` for the
+   first run: the example layout has a rule for it too, so the check would pass
+   even if you passed the wrong file.
 
 ## Bumping this repository's own gate
 

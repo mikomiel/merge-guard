@@ -1,30 +1,37 @@
-"""GT-01 §7: conservative, deterministic R×C change classifier.
+"""Specification §7: conservative, deterministic R×C change classifier.
 
-Per GT-01 §5.1: consumes only changed paths and bounded structured diff
+Per specification §5.1: consumes only changed paths and bounded structured diff
 shape -- never executes code from the changed branch to classify itself
 (§7.5's own constraint), never imports an operation module, and never
-reads ``fleet_deploy`` (that stays ``deploy_chain/catalog.py``'s concern,
+reads ``fleet_deploy`` (that stays the deploy catalog's concern,
 same as ``catalog.load_repository_control_policy``).
 
 **Mechanism and policy.** This module is the mechanism: how a changed-path set
 becomes a class, a set of rule ids and an assurance route. The policy -- which
 paths escalate to C1, which paths count as documentation, which files C3 may
 narrow -- is data in a TOML rule file, checked by :func:`validate_rules` and
-documented in ``docs/classifier-rules.md``. A caller supplies its own file with
-``rules=`` (``--rules`` on the command line). With none supplied the reference
-set beside this module, ``reference-rules.toml``, is used, so the default is the
-policy this module was extracted with and its results do not change.
+documented in ``docs/classifier-rules.md``. **There is no default policy.** A
+caller supplies its own file with ``rules=`` (``--rules FILE`` on the command
+line), and a call that gives none is refused with :class:`RulesRequired`: it is
+never classified against a rule set that its caller did not choose.
+``reference-rules.toml``, beside this module, is an example layout, not a policy
+to adopt, and nothing here reads it unless the caller passes it, as
+``load_rules(REFERENCE_RULES_PATH)``. Releases up to v0.4.0 classified a call
+that gave no rules against a built-in layout, the one of the repository this
+classifier was extracted from, so a caller that relied on that supplies its own
+file now.
 
 The classification functions are pure: each takes already-derived facts
 (changed paths, raw diff-shape lines, a :class:`Rules`) and returns a result.
-The only I/O is reading a rule file, in :func:`load_rules` and once at import
-for the reference set. A reference set that cannot be used fails the import
-with :class:`RulesUnusable`, never with a fallback; run as a script, the same
-failure is the command line's refusal (see :func:`main`).
+The only I/O is reading the rule file a caller names, in :func:`load_rules`.
+Importing this module reads no file, so a copy of it works without
+``reference-rules.toml`` beside it. A rule file that cannot be used is a
+:class:`RulesUnusable`, never a fallback; run as a script, the same failure is
+the command line's refusal (see :func:`main`).
 
 Deriving the facts from the current worktree is
-``forge.py``'s ``policy()`` operation (GT-01 2.4), matching how
-``git_gate/repository.py``'s ``_lane_changed_paths`` already derives the
+``forge.py``'s ``policy()`` operation (specification 2.4), matching how
+the gate's changed-path helper, ``_lane_changed_paths``, already derives the
 changed-path list this module classifies.
 
 Rule design notes, since §7.5 states the *conditions* but leaves several
@@ -39,7 +46,7 @@ what the mechanism does with any rule set:
   matching id is reported, so the order of the rules never changes a result.
 - **"Unbounded generated-output" and "missing-base"** are both projections
   of ``_lane_changed_paths`` returning ``None`` (unreadable, or over
-  ``LANE_CHANGED_PATHS_MAX`` per GF-05C's existing collision-forecast
+  ``LANE_CHANGED_PATHS_MAX`` per the gate's existing collision-forecast
   bound) -- reusing the bound this package already enforces elsewhere
   rather than inventing a second one, and treating "cannot compute changed
   paths" as itself C1-triggering rather than a separate failure path,
@@ -81,16 +88,18 @@ what the mechanism does with any rule set:
   classify itself, and "pass" cannot be determined any other way. It is
   enforced procedurally instead, by the same standing rule every other
   change in this repository already follows -- nothing merges without the
-  pinned test suite green (``git_gate/README.md``'s verification method) --
+  pinned test suite green (the gate's verification method) --
   not by a fifth algorithmic condition here.
 
-**Extraction provenance.** The rule identifiers and the path data in
-``reference-rules.toml`` are the policy of the estate this module was extracted
-from, not a general default: they are the reference set, kept so the
-classification can still be diffed against the copy it replaced, and a consumer
-with another layout supplies its own file instead. The module was moved here
-with its behaviour unchanged, and the path data was moved out of it into that
-file without changing a result.
+**Extraction provenance.** The module was moved here with its behaviour
+unchanged, and its path data was moved out of it into ``reference-rules.toml``
+without changing a result. The section labels in these docstrings are those of
+the specification it was written against, and a file or function these
+docstrings name that this repository does not hold belongs to the repository it
+was extracted from. From v0.2.0 to v0.4.0 the reference file held the layout of
+that repository (earlier releases had it in the code), and a call without rules
+used it. The file is now an example layout that nothing reads unless a caller passes it, and a
+consumer that relied on that default supplies its own file.
 """
 
 from __future__ import annotations
@@ -102,7 +111,7 @@ import tomllib
 import unicodedata
 from collections.abc import Iterable, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +135,16 @@ class RulesUnusable(ValueError):
     The message is a stable ``rules_*`` reason, optionally followed by ``: `` and
     detail naming the offending key, value or file. Callers branch on the reason;
     the detail is for people. ``docs/classifier-rules.md`` lists every reason.
+    """
+
+
+class RulesRequired(RulesUnusable):
+    """A call gave no rule set, and the classifier has none of its own.
+
+    Every entry point that takes ``rules=`` raises it when the argument is omitted
+    or ``None``, and the command line reports it when ``--rules FILE`` is missing.
+    It is a :class:`RulesUnusable`, so a caller that already refuses a rule file it
+    cannot use refuses this too. Its reason is ``rules_required``.
     """
 
 
@@ -372,43 +391,31 @@ def load_rules(path: str | os.PathLike[str]) -> Rules:
 
 
 def _refuse(reason: RulesUnusable) -> int:
-    """Print the stable refusal line for a rule file that cannot be used; return 2."""
+    """Print the stable refusal line for a rule set that cannot be used; return 2."""
 
     print(f"merge_guard_refused: {reason}", file=sys.stderr)
     return 2
 
 
-#: The reference rule set: the policy this module was extracted with. It sits
-#: beside this file, so a copy of the module needs a copy of the file.
+#: The example layout shipped beside this file: a synthetic monorepo, to read and
+#: to pass explicitly, as ``load_rules(REFERENCE_RULES_PATH)``. It is not a default
+#: and nothing here reads it. The path is computed, not opened, so importing the
+#: module needs no such file.
 REFERENCE_RULES_PATH = Path(__file__).resolve().with_name("reference-rules.toml")
-try:
-    _REFERENCE_RULES = load_rules(REFERENCE_RULES_PATH)
-except RulesUnusable as exc:
-    # Without a usable reference set the module must not classify, so importing
-    # it fails closed with the reason. Run as a script, the same failure is the
-    # command line's refusal (exit 2, no rows, no traceback). It comes before
-    # any argument is read, so a usable --rules file cannot hide it.
-    if __name__ != "__main__":
-        raise
-    raise SystemExit(_refuse(exc)) from None
 
-# The default rule set's C3 allowlists stay module attributes, read at call time
-# by :func:`_resolve`: that is how a caller, and the C3 structure tests,
-# substitute an allowlist in-process. They start as the reference file's lists.
-_APPROVED_MODEL_DEFINITION_FILES: frozenset[str] = _REFERENCE_RULES.model_files
-_APPROVED_MODEL_DEFINITION_FIELDS: frozenset[str] = _REFERENCE_RULES.model_fields
+# One line, no control character: the command line prints it as a refusal.
+_RULES_REQUIRED = (
+    "rules_required: a rule set is required; pass --rules FILE, or "
+    "rules=load_rules(path) in process; the example layout is REFERENCE_RULES_PATH"
+)
 
 
-def _resolve(rules: Rules | None) -> Rules:
-    """*rules*, or the reference set with the C3 allowlists as they stand now."""
+def _require(rules: Rules | None) -> Rules:
+    """*rules*, or :class:`RulesRequired`: the classifier has no rule set of its own."""
 
-    if rules is not None:
-        return rules
-    return replace(
-        _REFERENCE_RULES,
-        model_files=_APPROVED_MODEL_DEFINITION_FILES,
-        model_fields=_APPROVED_MODEL_DEFINITION_FIELDS,
-    )
+    if rules is None:
+        raise RulesRequired(_RULES_REQUIRED)
+    return rules
 
 
 _CLASS_STRENGTH = {"C3": 0, "C2": 1, "C1": 2}
@@ -462,14 +469,15 @@ def c1_path_rules_by_path(
     Evaluated one path at a time: every path rule is per-path (a rule's
     exemptions need *some* non-exempt path, which a single path satisfies on its
     own), so the union over single-path calls equals the whole-set verdict.
-    Shared with ``scripts/ci-profile``, which escalates a pull-request run to
-    the full manifest for any path listed here; that script runs this module
-    as ``python3 -I assurance.py`` and never copies the rule lists.
+    A CI entrypoint can escalate a pull-request run to its full set of checks
+    for any path listed here: it runs this module as
+    ``python3 -I assurance.py --rules FILE`` and never copies the rule lists.
 
-    *rules* is the rule set to match against; ``None`` is the reference set.
+    *rules* is the rule set to match against. It is required: an omitted or
+    ``None`` *rules* raises :class:`RulesRequired`.
     """
 
-    rules = _resolve(rules)
+    rules = _require(rules)
     return [
         (rule, path)
         for path in changed_paths
@@ -480,24 +488,25 @@ def c1_path_rules_by_path(
 def main(stdin: Iterable[str], argv: Sequence[str] = ()) -> int:
     """Stdlib entry point: changed paths on stdin, ``<rule_id>\t<path>`` out.
 
-    ``--rules FILE`` classifies against that rule file instead of the reference
-    set. A file that cannot be used prints ``merge_guard_refused: <reason>`` on
-    stderr, prints no rows and returns 2, so empty output means "no path
-    matched" only when the status is 0: the paths are never classified against
-    a weaker rule set than the one asked for. A reference set that cannot be
-    used is refused the same way when the module runs as a script, before this
-    function is reached and whatever *argv* holds.
+    ``--rules FILE`` is required: the classifier has no rule set of its own, and
+    classifies against that rule file alone. Without it nothing is classified, and
+    a file that cannot be used is not classified against either: both print
+    ``merge_guard_refused: <reason>`` on stderr (``rules_required`` for the
+    missing ``--rules FILE``), print no rows and return 2, so empty output means
+    "no path matched" only when the status is 0: the paths are never classified
+    against a weaker rule set than the one asked for, and never against one that
+    was not asked for. Any other *argv* prints the usage line and returns 2.
     """
 
-    rules = None
-    if argv:
-        if len(argv) != 2 or argv[0] != "--rules":
-            print("usage: assurance.py [--rules FILE] < changed-paths", file=sys.stderr)
-            return 2
-        try:
-            rules = load_rules(argv[1])
-        except RulesUnusable as exc:
-            return _refuse(exc)
+    if not argv:
+        return _refuse(RulesRequired(_RULES_REQUIRED))
+    if len(argv) != 2 or argv[0] != "--rules":
+        print("usage: assurance.py --rules FILE < changed-paths", file=sys.stderr)
+        return 2
+    try:
+        rules = load_rules(argv[1])
+    except RulesUnusable as exc:
+        return _refuse(exc)
     paths = [line.strip() for line in stdin if line.strip()]
     for rule, path in c1_path_rules_by_path(paths, rules=rules):
         print(f"{rule}\t{path}")
@@ -589,12 +598,15 @@ def classify_change(
     every changed path is already a member of the rule set's approved
     model-definition files (condition 1), which cannot happen with the
     reference set while that allowlist is empty. Real callers always pass
-    ``None``; tests populate it directly against a substituted allowlist.
+    ``None``; tests populate it directly against a rule set whose allowlists
+    are filled (``dataclasses.replace`` on a :class:`Rules`).
 
-    *rules* is the rule set to classify against; ``None`` is the reference set.
+    *rules* is the rule set to classify against. It is required, even when
+    *changed_paths* is ``None``: an omitted or ``None`` *rules* raises
+    :class:`RulesRequired` before anything is classified.
     """
 
-    rules = _resolve(rules)
+    rules = _require(rules)
     if changed_paths is None:
         return ClassificationResult("C1", (_C1_UNKNOWN_CONTRADICTORY,))
 
@@ -630,15 +642,17 @@ def assurance_route_for(
     actually needed review to tests-only would be a real correctness gap,
     where defaulting to the stronger combined route never is.
 
-    *rules* is the rule set to read the documentation lists from; ``None`` is
-    the reference set.
+    *rules* is the rule set to read the documentation lists from. It is required
+    for every class: the route of a C1 or C3 change does not read it, but a call
+    that gives none is refused all the same (:class:`RulesRequired`), so a missing
+    rule set shows at once and not at the first C2 change.
     """
 
+    rules = _require(rules)
     if change_class == "C1":
         return "tests_and_review"
     if change_class == "C3":
         return "tests"
-    rules = _resolve(rules)
     if changed_paths and all(
         path.endswith(rules.doc_only_suffixes) or path.startswith(rules.doc_only_prefixes)
         for path in changed_paths
@@ -662,7 +676,7 @@ def required_check_profile_for(change_class: str, ci_applicability: str) -> str 
     statement about review, and reading it as permission to accept weaker CI
     evidence would lower a trust-boundary minimum to tidy an inconsistency
     that is not one. Recorded here because the separation reads like an
-    oversight otherwise: HB-937 was filed on exactly that reading, before
+    oversight otherwise: an issue was filed on exactly that reading, before
     the two spec sections were compared. Keep them independent.
     """
 
