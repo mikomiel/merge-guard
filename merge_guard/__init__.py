@@ -12,6 +12,6 @@ from . import engine, policy
 #: The source version. Release-please owns this value once the release workflow
 #: (D13) lands; until then a release tag is set by hand and this value moves
 #: with it.
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = ["__version__", "engine", "policy"]
