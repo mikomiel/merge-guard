@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/mikomiel/merge-guard/compare/v0.4.0...v0.5.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **classifier:** a call that gives no rule set is refused (exit 2 on the command line, RulesRequired in process) instead of being classified against the old built-in layout. A caller that passes the vendored scripts/reference-rules.toml explicitly gets the example layout's classes. The rule ids C1-ANSIBLE-RUNTIME and C1-NETWORK-PVE are C1-AUTOMATION-RUNTIME and C1-NETWORK-HYPERVISOR in the example. To keep the old result, land a copy of the v0.4.0 reference-rules.toml outside the vendor root before the bump and pass it with --rules FILE or rules=.
+
+### Bug Fixes
+
+* **classifier:** require a rule set and ship an example layout ([#79](https://github.com/mikomiel/merge-guard/issues/79)) ([cd7b34f](https://github.com/mikomiel/merge-guard/commit/cd7b34f8a6885cce515f866acbe55a05704197dd))
+
 ## [0.4.0](https://github.com/mikomiel/merge-guard/compare/v0.3.0...v0.4.0) (2026-11-18)
 
 

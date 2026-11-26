@@ -5,7 +5,7 @@
 # release pull request.
 [project]
 name = "merge-guard"
-version = "0.4.0"
+version = "0.5.0"
 description = "A pre-merge gate: an approval and a CI result must belong to the exact commit being merged."
 readme = "README.md"
 requires-python = ">=3.11"
